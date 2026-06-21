@@ -1,0 +1,143 @@
+import React, { useState } from 'react';
+import { Mail, Send, CheckCircle, Eye, X, Clock } from 'lucide-react';
+import toast from 'react-hot-toast';
+
+const TEMPLATES = [
+  { key:'complaint_assigned', subject:'Your Complaint Has Been Assigned — [Ticket]', body:`Dear [Name],\n\nThank you for contacting Ticano Group. Your complaint [Ticket] has been received and assigned to your Portfolio Manager, [PM], who will be in touch within 24 hours.\n\nYou can track your complaint status at any time by logging into the Ticano Client Portal.\n\nWe are committed to resolving your concern within 14 business days.\n\nWarm regards,\nTicano Group Service Team\nwww.ticanogroup.co.bw` },
+  { key:'complaint_resolved', subject:'Your Complaint Has Been Resolved — [Ticket]', body:`Dear [Name],\n\nWe are pleased to inform you that your complaint [Ticket] has been successfully resolved.\n\nResolution summary: [Resolution]\n\nWe value your feedback. Please take a moment to rate your experience using the link below:\n[ReviewLink]\n\nThank you for your patience and for banking with Ticano Group.\n\nWarm regards,\nTicano Group Service Team\nwww.ticanogroup.co.bw` },
+  { key:'escalation_notice', subject:'Complaint Escalation Notice — [Ticket]', body:`Dear [Name],\n\nWe want to inform you that your complaint [Ticket] has been escalated to our senior management team for priority resolution.\n\nWe sincerely apologise for any inconvenience caused and assure you this is now being handled with the highest priority.\n\nA senior team member will contact you within 2 business days.\n\nWarm regards,\nTicano Group Service Team\nwww.ticanogroup.co.bw` },
+  { key:'sla_breach_internal', subject:'⚠️ SLA Breach Alert — [Ticket] — Action Required', body:`Dear [PM],\n\nThis is an automated alert to notify you that complaint [Ticket] assigned to you has exceeded the 14-day SLA resolution deadline.\n\nClient: [Name]\nTicket: [Ticket]\nDays overdue: [Days]\n\nPlease action this complaint immediately and update the status in the system.\n\nThis alert has been copied to your Service Manager.\n\nTicano Group — Automated Service Alert` },
+];
+
+export default function EmailNotifications() {
+  const [selected, setSelected]   = useState(TEMPLATES[0]);
+  const [recipient, setRecipient] = useState('client@demo.com');
+  const [vars, setVars]           = useState({ Name:'Stacey Nthoi', Ticket:'TCN-0002', PM:'Mojaboswa', Resolution:'', ReviewLink:'https://ticanogroup.co.bw/review', Days:'2' });
+  const [sending, setSending]     = useState(false);
+  const [sent, setSent]           = useState([]);
+  const [preview, setPreview]     = useState(false);
+
+  const buildBody = (tpl) => {
+    let s = tpl.subject; let b = tpl.body;
+    Object.entries(vars).forEach(([k,v]) => { s = s.replaceAll(`[${k}]`,v||`[${k}]`); b = b.replaceAll(`[${k}]`,v||`[${k}]`); });
+    return { subject:s, body:b };
+  };
+
+  const { subject, body } = buildBody(selected);
+
+  const handleSend = async () => {
+    setSending(true);
+    await new Promise(r => setTimeout(r, 900));
+    setSent(prev => [{ id:Date.now(), to:recipient, subject, sentAt:new Date() }, ...prev]);
+    toast.success(`Email sent to ${recipient} ✓`);
+    setSending(false);
+  };
+
+  const inp = 'w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2 text-sm bg-white dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-ticano-red';
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Composer */}
+        <div className="bg-white dark:bg-ticano-dark-card rounded-2xl border border-gray-100 dark:border-gray-700 p-5 shadow-sm">
+          <h4 className="font-semibold text-ticano-charcoal dark:text-white mb-4 flex items-center gap-2">
+            <Mail size={15} className="text-ticano-red"/> Email Composer
+          </h4>
+
+          <div className="mb-3">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">Template</label>
+            <select value={selected.key} onChange={e=>setSelected(TEMPLATES.find(t=>t.key===e.target.value)||TEMPLATES[0])} className={inp}>
+              {TEMPLATES.map(t=><option key={t.key} value={t.key}>{t.subject.split('—')[0].trim()}</option>)}
+            </select>
+          </div>
+
+          <div className="mb-3">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">To</label>
+            <input value={recipient} onChange={e=>setRecipient(e.target.value)} className={inp} placeholder="recipient@email.com"/>
+          </div>
+
+          <div className="mb-4 grid grid-cols-2 gap-2">
+            {['Name','Ticket','PM','Resolution'].map(v=>(
+              <div key={v}>
+                <label className="text-[10px] text-gray-400 block mb-0.5">[{v}]</label>
+                <input value={vars[v]||''} onChange={e=>setVars({...vars,[v]:e.target.value})} className={inp} placeholder={v}/>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={()=>setPreview(true)} className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 rounded-xl text-sm hover:bg-gray-50 transition-colors">
+              <Eye size={13}/>Preview
+            </button>
+            <button onClick={handleSend} disabled={sending} className="flex-1 flex items-center justify-center gap-2 py-2 bg-ticano-red text-white rounded-xl text-sm font-semibold hover:bg-ticano-red-dark transition-colors disabled:opacity-60">
+              {sending?<><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Sending…</>:<><Send size={13}/>Send Email</>}
+            </button>
+          </div>
+        </div>
+
+        {/* Sent log */}
+        <div className="bg-white dark:bg-ticano-dark-card rounded-2xl border border-gray-100 dark:border-gray-700 p-5 shadow-sm">
+          <h4 className="font-semibold text-ticano-charcoal dark:text-white mb-4 flex items-center gap-2">
+            <CheckCircle size={15} className="text-green-500"/> Sent Log
+          </h4>
+          {sent.length===0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <Mail size={28} className="text-gray-200 mb-2"/>
+              <p className="text-sm text-gray-400">No emails sent yet</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {sent.map(s=>(
+                <div key={s.id} className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                  <CheckCircle size={14} className="text-green-500 mt-0.5 shrink-0"/>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-800 dark:text-white truncate">{s.subject}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">To: {s.to}</p>
+                    <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
+                      <Clock size={10}/>{s.sentAt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Preview modal */}
+      {preview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={()=>setPreview(false)}/>
+          <div className="relative w-full max-w-xl bg-white dark:bg-ticano-dark-card rounded-2xl shadow-2xl animate-scale-in overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+              <p className="font-semibold text-ticano-charcoal dark:text-white">Email Preview</p>
+              <button onClick={()=>setPreview(false)} className="text-gray-400 hover:text-gray-600"><X size={16}/></button>
+            </div>
+            <div className="p-5">
+              {/* Email chrome */}
+              <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+                <div className="bg-gray-50 dark:bg-gray-800 px-4 py-3 border-b border-gray-200 dark:border-gray-700 space-y-1">
+                  <p className="text-xs"><span className="text-gray-400">From:</span> <span className="text-gray-700 dark:text-gray-200">noreply@ticanogroup.co.bw</span></p>
+                  <p className="text-xs"><span className="text-gray-400">To:</span> <span className="text-gray-700 dark:text-gray-200">{recipient}</span></p>
+                  <p className="text-xs"><span className="text-gray-400">Subject:</span> <span className="text-gray-800 dark:text-white font-semibold">{subject}</span></p>
+                </div>
+                <div className="p-5">
+                  <div className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-100 dark:border-gray-700">
+                    <div className="w-8 h-8 bg-ticano-red rounded-lg flex items-center justify-center">
+                      <span className="text-white font-bold text-xs">T</span>
+                    </div>
+                    <div>
+                      <p className="font-bold text-ticano-charcoal dark:text-white text-sm">Ticano Group</p>
+                      <p className="text-xs text-gray-400">Purchase Order Financing</p>
+                    </div>
+                  </div>
+                  <pre className="text-sm text-gray-700 dark:text-gray-200 whitespace-pre-wrap leading-relaxed font-sans">{body}</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

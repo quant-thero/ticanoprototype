@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <defs>
+    <linearGradient id="bgFade" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#475569;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e293b;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="suitGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a5f;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0f1e30;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="400" height="400" fill="url(#bgFade)"/>
+  <!-- Subtle wall texture -->
+  <rect width="400" height="400" fill="#000" opacity="0.05"/>
+  <!-- Suit / shoulders -->
+  <path d="M 80 400 Q 100 280 200 270 Q 300 280 320 400 Z" fill="url(#suitGrad)"/>
+  <!-- Shirt collar -->
+  <path d="M 175 290 L 200 320 L 225 290 L 215 275 L 200 285 L 185 275 Z" fill="#f8fafc"/>
+  <!-- Tie -->
+  <path d="M 192 300 L 208 300 L 212 380 L 200 395 L 188 380 Z" fill="#7c1d2a"/>
+  <path d="M 195 310 L 205 310 L 207 340 L 200 348 L 193 340 Z" fill="#a32a3a" opacity="0.8"/>
+  <!-- Neck -->
+  <ellipse cx="200" cy="275" rx="22" ry="20" fill="#5a4636"/>
+  <!-- Head -->
+  <ellipse cx="200" cy="200" rx="62" ry="78" fill="#6b5340"/>
+  <!-- Hair (close-cropped) -->
+  <path d="M 138 175 Q 145 130 200 122 Q 255 130 262 175 Q 258 165 250 162 Q 200 145 150 162 Q 142 165 138 175 Z" fill="#2a2520"/>
+  <!-- Side hair -->
+  <ellipse cx="145" cy="200" rx="8" ry="22" fill="#2a2520"/>
+  <ellipse cx="255" cy="200" rx="8" ry="22" fill="#2a2520"/>
+  <!-- Eyebrows -->
+  <ellipse cx="178" cy="190" rx="11" ry="3" fill="#1a1410"/>
+  <ellipse cx="222" cy="190" rx="11" ry="3" fill="#1a1410"/>
+  <!-- Eyes -->
+  <ellipse cx="178" cy="200" rx="6" ry="3.5" fill="#f8fafc"/>
+  <ellipse cx="222" cy="200" rx="6" ry="3.5" fill="#f8fafc"/>
+  <circle cx="178" cy="200" r="2.5" fill="#3a2818"/>
+  <circle cx="222" cy="200" r="2.5" fill="#3a2818"/>
+  <!-- Nose -->
+  <path d="M 200 205 Q 195 225 198 235 Q 200 238 202 235 Q 205 225 200 205 Z" fill="#5a4636" opacity="0.6"/>
+  <!-- Mouth -->
+  <path d="M 188 250 Q 200 254 212 250" stroke="#3a2818" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- Glasses (subtle, like in the photo) -->
+  <g stroke="#1a1410" stroke-width="1.5" fill="none" opacity="0.7">
+    <ellipse cx="178" cy="200" rx="13" ry="9"/>
+    <ellipse cx="222" cy="200" rx="13" ry="9"/>
+    <line x1="191" y1="200" x2="209" y2="200"/>
+  </g>
+</svg>
