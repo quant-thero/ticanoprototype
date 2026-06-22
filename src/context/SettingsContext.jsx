@@ -8,7 +8,8 @@ const TRANSLATIONS = {
   en: {},
   tn: {
     // Greetings
-    'Welcome back': 'Boi gape',
+    'Welcome back': 'Re go amogela gape',
+    'Welcome Back': 'Re go amogela gape',
     'Welcome to Ticano': 'O amogetswe kwa Ticano',
     'Hello': 'Dumela',
     'Good morning': 'Dumela',

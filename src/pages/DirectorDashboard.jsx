@@ -11,6 +11,7 @@ import BranchLeaderboard from '../components/common/BranchLeaderboard';
 import AdvancedCharts from '../components/common/AdvancedCharts';
 import EmailNotifications from '../components/common/EmailNotifications';
 import AnnouncementBanner from '../components/common/AnnouncementBanner';
+import PerformanceKpis from '../components/common/PerformanceKpis';
 import {
   getBranchComparison, getReferralSources, getCsatTrend, getWordCloud,
   getLocationAnalytics, getLeadFunnel, getReferralNetwork,
@@ -18,13 +19,14 @@ import {
   getActionCentre, getExecutiveDashboard, getBranchHealthScores,
   getSmartInsights, getComplaintHeatMap,
   getAnnouncements, createAnnouncement, deleteAnnouncement,
+  getPmEscalationRates, getFcrRates, getMonthlyCsat, getPmCapacity, getWeeklyReport,
 } from '../services/api';
 import { formatPercent } from '../utils/format';
 import { JOURNEY_STAGE_LABEL, complaintStatusLabel, BRANCH_COORDS } from '../utils/constants';
 import { formatDateTime } from '../utils/format';
 import toast from 'react-hot-toast';
 
-const TABS = ['Action Centre', 'Executive Summary', 'Branch Health', 'Smart Insights', 'Heat Map', 'Branch Comparison', 'Branch Leaderboard', 'Active Client Mix', 'Complaint Analytics', 'Escalations', 'Lead Conversion', 'Referral Network', 'Announcements', 'Reports', 'Predictive Analytics', 'Advanced Charts', 'Email Notifications', 'Bulk Message'];
+const TABS = ['Action Centre', 'Executive Summary', 'Performance KPIs', 'Branch Health', 'Smart Insights', 'Heat Map', 'Branch Comparison', 'Branch Leaderboard', 'Active Client Mix', 'Complaint Analytics', 'Escalations', 'Lead Conversion', 'Referral Network', 'Announcements', 'Reports', 'Predictive Analytics', 'Advanced Charts', 'Email Notifications', 'Bulk Message'];
 const COLORS = ['#CE313C', '#808686', '#a6abab', '#373435', '#a8252f'];
 const RED = '#CE313C';
 const GRAY = '#808686';
@@ -100,6 +102,9 @@ export default function DirectorDashboard() {
 
         {/* ---------- BRANCH HEALTH (§10) ---------- */}
         {activeTab === 'Branch Health' && <BranchHealthTab />}
+
+        {/* §1/§8/§15/§16/§19 — Performance KPIs (enterprise-wide) */}
+        {activeTab === 'Performance KPIs' && <PerformanceKpis scopeLabel="All branches" />}
 
         {/* ---------- SMART INSIGHTS (§20) ---------- */}
         {activeTab === 'Smart Insights' && <SmartInsightsTab />}

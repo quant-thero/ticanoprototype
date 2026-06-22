@@ -43,8 +43,37 @@ export const login = async (identifier, _password) => {
   return { data: { token: 'mock-jwt-token.' + btoa(key), ...user } };
 };
 
-export const registerCustomer = (data) =>
-  ok({ token: 'mock-jwt-token.newuser', userId: 99, name: data?.name || 'New Customer', role: 'customer', branch: data?.preferredBranch || 'Gaborone', clientType: 'new' });
+export const registerCustomer = (data) => {
+  // §12 — Lead Conversion Automation: if this registrant matches an existing
+  // potential client (by phone or email), convert that lead to a customer and
+  // remove it from the Potential Clients pipeline. No duplicates created.
+  const phone = (data?.whatsappNumber || data?.phone || '').replace(/\s+/g, '');
+  const email = (data?.email || '').toLowerCase();
+  let convertedLeadId = null;
+  if (phone || email) {
+    const match = LEADS.find((l) =>
+      (phone && (l.phone || '').replace(/\s+/g, '') === phone) ||
+      (email && (l.email || '').toLowerCase() === email)
+    );
+    if (match) {
+      convertedLeadId = match.id;
+      // Mark converted (moves out of "Potential Clients", into "Active Customers").
+      LEADS = LEADS.map((l) => (l.id === match.id ? { ...l, status: 'Converted', convertedAt: new Date().toISOString() } : l));
+    }
+  }
+
+  // §10 — Referral Network: log the referrer name when supplied.
+  if (data?.referrerName && data?.referralSource && /friend|family/i.test(data.referralSource)) {
+    logReferral(data.referrerName, data.name);
+  }
+
+  return ok({
+    token: 'mock-jwt-token.newuser', userId: 99,
+    name: data?.name || 'New Customer', role: 'customer',
+    branch: data?.preferredBranch || 'Gaborone', clientType: 'new',
+    convertedLeadId,
+  });
+};
 
 // ---- Customer profile ----
 //  §13: no Omang. §14: DOB optional with birthday opt-in. §16: location opt-in.
@@ -326,14 +355,35 @@ export const assignComplaint = (complaintId, data) => {
   const now = new Date().toISOString();
   const before = COMPLAINTS.find((c) => c.id === Number(complaintId));
   const prevStatus = before?.status;
+  // §14 — Smart Assignment override: if the manager picked someone other than
+  // the recommended PM, a reason is mandatory and stored permanently.
+  const isOverride = !!data.overrideReason || (data.recommendedPmId && data.recommendedPmId !== data.pmId);
+  if (isOverride && !data.overrideReason) {
+    const err = new Error('Override reason required');
+    err.response = { status: 400, data: { message: 'A reason is required when overriding the recommended PM.' } };
+    throw err;
+  }
+  const eventLabel = isOverride
+    ? `Assigned to ${data.pmName} (override of recommendation)`
+    : `Assigned to ${data.pmName}`;
   const c = _applyToComplaint(complaintId, (c) => ({
     ...c,
     assignedPmId: data.pmId,
     assignedPmName: data.pmName,
     status: 'assigned',
-    timeline: [...c.timeline, { at: now, event: `Assigned to ${data.pmName}`, status: 'assigned', actor: data.assignedBy || 'Service Manager' }],
+    assignment: {
+      at: now, by: data.assignedBy || 'Service Manager',
+      recommendedPmId: data.recommendedPmId || null,
+      recommendedPmName: data.recommendedPmName || null,
+      followedRecommendation: !isOverride,
+      overrideReason: isOverride ? data.overrideReason : null,
+    },
+    timeline: [...c.timeline, { at: now, event: eventLabel, status: 'assigned', actor: data.assignedBy || 'Service Manager' }],
+    internalNotes: isOverride
+      ? [...c.internalNotes, { at: now, author: data.assignedBy || 'Service Manager', text: `Smart-assignment override reason: ${data.overrideReason}` }]
+      : c.internalNotes,
   }));
-  if (c) logAudit(c, 'Assigned', prevStatus, 'assigned', data.assignedBy || 'Service Manager');
+  if (c) logAudit(c, isOverride ? 'Assigned (override)' : 'Assigned', prevStatus, 'assigned', data.assignedBy || 'Service Manager');
   return ok({ message: 'Complaint assigned', complaintId });
 };
 
@@ -389,24 +439,76 @@ export const updateSentiment = (complaintId, sentiment, actor) => {
   return ok({ message: 'Sentiment tag updated', complaintId, sentiment });
 };
 
-// Escalate to management — reason is mandatory.
+// =====================================================================
+//  ESCALATION HIERARCHY (§2, §3)
+//    Customer Complaint → Portfolio Manager → Service Manager → Director
+//  • Portfolio Manager escalates to the branch Service Manager.
+//  • Service Manager escalates to the Director.
+//  • Customers can NOT escalate directly.
+//  Every escalation: audit entry + timeline + notification + reason +
+//  timestamp.
+// =====================================================================
+
+// Who a complaint escalates TO, based on who is escalating.
+export const escalationTargetForRole = (role) => {
+  switch (role) {
+    case 'portfolio_manager': return { level: 'service_manager', label: 'Service Manager' };
+    case 'service_manager':   return { level: 'director',        label: 'Director' };
+    default:                  return null; // customers/marketing cannot escalate
+  }
+};
+
+// In-memory notification feed (consumed by NotificationContext / dashboards).
+let ESCALATION_NOTIFICATIONS = [];
+export const getEscalationNotifications = (forRole) =>
+  ok(ESCALATION_NOTIFICATIONS.filter((n) => !forRole || n.toRole === forRole));
+
+// Escalate to the next level in the hierarchy — reason is mandatory.
 export const escalateComplaint = (complaintId, data) => {
   if (!data.reason) {
     const err = new Error('Escalation reason required');
     err.response = { status: 400, data: { message: 'Escalation reason is required' } };
     throw err;
   }
+  const fromRole = data.fromRole || 'portfolio_manager';
+  const target = escalationTargetForRole(fromRole);
+  if (!target) {
+    const err = new Error('Not permitted to escalate');
+    err.response = { status: 403, data: { message: 'Customers cannot escalate complaints directly.' } };
+    throw err;
+  }
   const now = new Date().toISOString();
   const before = COMPLAINTS.find((c) => c.id === Number(complaintId));
   const prev = before?.status;
+  const eventLabel = `Escalated to ${target.label}`;
   const c = _applyToComplaint(complaintId, (c) => ({
     ...c,
     status: 'escalated',
-    escalation: { at: now, by: data.by || 'PM', reason: data.reason },
-    timeline: [...c.timeline, { at: now, event: 'Escalated to Management', status: 'escalated', actor: data.by || 'PM' }],
+    escalation: {
+      at: now,
+      by: data.by || 'Staff',
+      byRole: fromRole,
+      toLevel: target.level,
+      toLabel: target.label,
+      reason: data.reason,
+      // keep a full chain so multi-step escalations are auditable
+      chain: [...((c.escalation && c.escalation.chain) || []), {
+        at: now, by: data.by || 'Staff', fromRole, toLevel: target.level, reason: data.reason,
+      }],
+    },
+    timeline: [...c.timeline, { at: now, event: eventLabel, status: 'escalated', actor: data.by || 'Staff' }],
   }));
-  if (c) logAudit(c, 'Escalated', prev, 'escalated', data.by || 'PM');
-  return ok({ message: 'Complaint escalated', complaintId });
+  if (c) {
+    logAudit(c, eventLabel, prev, 'escalated', data.by || 'Staff');
+    ESCALATION_NOTIFICATIONS = [{
+      id: Date.now(),
+      complaintId: c.id, ticket: c.ticket, branch: c.branch,
+      fromRole, toRole: target.level, toLabel: target.label,
+      message: `${c.ticket} escalated to ${target.label} by ${data.by || 'Staff'}`,
+      reason: data.reason, at: now, read: false,
+    }, ...ESCALATION_NOTIFICATIONS];
+  }
+  return ok({ message: `Complaint escalated to ${target.label}`, complaintId, target });
 };
 
 // Mark resolved. Customer notes can be appended.
@@ -752,17 +854,112 @@ export const getReferralNetwork = () => ok({
 //  ADMIN
 // =====================================================================
 
-export const getUsers = () => ok([
+let USERS = [
   { id: 2,  name: 'Mojaboswa',         email: 'pm@demo.com',        role: 'portfolio_manager', branch: 'Gaborone',    isActive: true,  createdAt: '2025-09-01T08:00:00' },
   { id: 3,  name: 'Janine Seabenyane', email: 'service@demo.com',   role: 'service_manager',   branch: 'Gaborone',    isActive: true,  createdAt: '2025-08-15T08:00:00' },
   { id: 4,  name: 'Opelo Motswagae',   email: 'director@demo.com',  role: 'director',          branch: 'Head Office', isActive: true,  createdAt: '2025-07-20T08:00:00' },
   { id: 9,  name: 'Onkarabile Sello',  email: 'osello@ticano.bw',   role: 'portfolio_manager', branch: 'Gaborone',    isActive: true,  createdAt: '2025-10-05T08:00:00' },
   { id: 12, name: 'Tebogo Nkosi',      email: 'tnkosi@ticano.bw',   role: 'portfolio_manager', branch: 'Maun',        isActive: false, createdAt: '2025-11-11T08:00:00' },
-]);
+];
+let NEXT_USER_ID = 100;
 
-export const createUser = (data) => ok({ message: 'User created', id: 100, ...data });
-export const updateUser = (id, data) => ok({ message: 'User updated', id, ...data });
-export const deleteUser = (id) => ok({ message: 'User deactivated', id });
+// Per-user activity log (§5 — View Activity / View Audit History).
+let USER_ACTIVITY = {
+  2:  [{ at: '2026-06-14T16:30:00', action: 'Resolved complaint TCN-0004' }, { at: '2026-06-12T09:30:00', action: 'Updated TCN-0001 to In Progress' }],
+  3:  [{ at: '2026-06-14T09:30:00', action: 'Assigned TCN-0002 to Onkarabile Sello' }],
+  9:  [{ at: '2026-06-13T11:00:00', action: 'Picked up TCN-0002' }],
+};
+const logUserActivity = (userId, action) => {
+  USER_ACTIVITY[userId] = [{ at: new Date().toISOString(), action }, ...(USER_ACTIVITY[userId] || [])];
+};
+
+export const getUsers = (filters = {}) => {
+  let rows = [...USERS];
+  if (filters.role)   rows = rows.filter((u) => u.role === filters.role);
+  if (filters.branch) rows = rows.filter((u) => u.branch === filters.branch);
+  if (filters.status === 'active')   rows = rows.filter((u) => u.isActive);
+  if (filters.status === 'disabled') rows = rows.filter((u) => !u.isActive);
+  return ok(rows);
+};
+
+export const createUser = (data) => {
+  const user = { id: NEXT_USER_ID++, isActive: true, createdAt: new Date().toISOString(), ...data };
+  USERS = [user, ...USERS];
+  logUserActivity(user.id, 'Account created');
+  return ok({ message: 'User created', user });
+};
+
+export const updateUser = (id, data) => {
+  USERS = USERS.map((u) => (u.id === Number(id) ? { ...u, ...data } : u));
+  logUserActivity(Number(id), `Profile updated (${Object.keys(data).join(', ')})`);
+  return ok({ message: 'User updated', user: USERS.find((u) => u.id === Number(id)) });
+};
+
+// §5 — Enable / Disable account.
+export const setUserActive = (id, isActive) => {
+  USERS = USERS.map((u) => (u.id === Number(id) ? { ...u, isActive } : u));
+  logUserActivity(Number(id), isActive ? 'Account enabled' : 'Account disabled');
+  return ok({ message: isActive ? 'User enabled' : 'User disabled', id, isActive });
+};
+export const deleteUser = (id) => setUserActive(id, false);
+
+// §5 — Change role.
+export const changeUserRole = (id, role) => {
+  USERS = USERS.map((u) => (u.id === Number(id) ? { ...u, role } : u));
+  logUserActivity(Number(id), `Role changed to ${role}`);
+  return ok({ message: 'Role updated', id, role });
+};
+
+// §5 — Change branch.
+export const changeUserBranch = (id, branch) => {
+  USERS = USERS.map((u) => (u.id === Number(id) ? { ...u, branch } : u));
+  logUserActivity(Number(id), `Branch changed to ${branch}`);
+  return ok({ message: 'Branch updated', id, branch });
+};
+
+// §5 — View activity / audit history for a single employee.
+export const getUserActivity = (id) => {
+  const user = USERS.find((u) => u.id === Number(id));
+  const complaintActivity = AUDIT_LOG.filter((a) => a.user === user?.name);
+  return ok({
+    activity: USER_ACTIVITY[Number(id)] || [],
+    complaintAudit: complaintActivity,
+  });
+};
+
+// =====================================================================
+//  PASSWORD RESET (§6)
+// =====================================================================
+// Customers may self-reset via email verification.
+export const requestCustomerPasswordReset = (email) => {
+  if (!email) {
+    const err = new Error('Email required');
+    err.response = { status: 400, data: { message: 'Please enter the email on your account.' } };
+    throw err;
+  }
+  return ok({
+    message: `If an account exists for ${email}, a password-reset link has been emailed.`,
+    method: 'email_verification',
+    email,
+  });
+};
+
+// Employees cannot self-reset. Admin resets and the system issues a temporary
+// password (e.g. TCN-Temp-4582) that must be changed on next login.
+let TEMP_PW_SEQ = 4582;
+export const adminResetEmployeePassword = (id) => {
+  const user = USERS.find((u) => u.id === Number(id));
+  if (!user) return ok({ message: 'User not found' });
+  const tempPassword = `TCN-Temp-${TEMP_PW_SEQ++}`;
+  USERS = USERS.map((u) => (u.id === Number(id) ? { ...u, mustChangePassword: true } : u));
+  logUserActivity(Number(id), 'Password reset by admin (temporary password issued)');
+  return ok({
+    message: `Temporary password generated for ${user.name}. They must change it on next login.`,
+    tempPassword,
+    mustChangePassword: true,
+    id,
+  });
+};
 
 export const getAuditLogs = () => ok([
   { id: 1, userId: 5, action: 'CREATE_USER',        details: 'Created user osello@ticano.bw',                         createdAt: '2026-06-14T10:11:00' },
@@ -809,6 +1006,29 @@ let BRANCH_DIRECTORY = BRANCHES.map((b, i) => ({
 }));
 
 export const getBranches = () => ok([...BRANCH_DIRECTORY]);
+
+// §4 — Admin can create a new branch.
+let NEXT_BRANCH_ID = 100;
+export const createBranch = (data) => {
+  const branch = {
+    id: NEXT_BRANCH_ID++,
+    name: data.name,
+    code: data.code || '',
+    region: data.region || '',
+    address: data.address || '',
+    city: data.city || data.name,
+    country: 'Botswana',
+    phone: data.phone || '',
+    email: data.email || '',
+    manager: data.manager || '',
+    isActive: data.status !== 'inactive',
+    openHours: data.openHours || 'Mon–Fri 08:00–17:00',
+    notes: data.notes || '',
+  };
+  BRANCH_DIRECTORY = [...BRANCH_DIRECTORY, branch];
+  return ok({ message: 'Branch created', branch });
+};
+
 export const updateBranch = (id, data) => {
   BRANCH_DIRECTORY = BRANCH_DIRECTORY.map((b) => (b.id === Number(id) ? { ...b, ...data } : b));
   return ok({ message: 'Branch updated', branch: BRANCH_DIRECTORY.find((b) => b.id === Number(id)) });
@@ -1004,13 +1224,18 @@ export const recommendPm = (complaintId) => {
     const active = COMPLAINTS.filter((x) => x.assignedPmId === pm.pmId && OPEN_COMPLAINT_STATUSES.includes(x.status)).length;
     const branchMatch = pm.branch === c.branch ? 1 : 0;
     const categoryMatch = pm.categoryStrengths.includes(c.category) ? 1 : 0;
+    // §16 — penalise (and flag) PMs at/over client capacity.
+    const cap = PM_CAPACITY[pm.pmId];
+    const atCapacity = cap ? cap.currentClients >= cap.maxClients : false;
+    const capacityPenalty = atCapacity ? 1000 : (cap && cap.currentClients / cap.maxClients >= 0.9 ? 20 : 0);
     // Lower score = better. Workload dominates; ties broken by speed & satisfaction.
     const score = active * 10
       + pm.avgResolutionDays
       - (pm.satisfaction * 2)
       - (branchMatch * 8)
-      - (categoryMatch * 4);
-    return { ...pm, activeComplaints: active, branchMatch: !!branchMatch, categoryMatch: !!categoryMatch, score: Number(score.toFixed(2)) };
+      - (categoryMatch * 4)
+      + capacityPenalty;
+    return { ...pm, activeComplaints: active, branchMatch: !!branchMatch, categoryMatch: !!categoryMatch, atCapacity, score: Number(score.toFixed(2)) };
   });
   workload.sort((a, b) => a.score - b.score);
   return ok({
@@ -1054,11 +1279,39 @@ export const getAgingDashboard = (filters = {}) => {
 };
 
 // =====================================================================
-//  BRANCH HEALTH SCORE (§10) — Director only.
+//  BRANCH HEALTH SCORE (§7, §10) — configurable weights, Director/Admin.
 // =====================================================================
-//   Resolution rate (40) + Escalation inverse (15) + Satisfaction (25) +
-//   SLA compliance (15) + Volume balance (5)  = 100
+// §7 — weights are NOT hardcoded. Admin edits benchmark weightings; the
+// total must always equal 100.
+let HEALTH_WEIGHTS = {
+  resolutionRate:    30,
+  satisfactionScore: 30,
+  slaCompliance:     20,
+  escalationRate:    10,
+  complaintVolume:   10,
+};
+export const HEALTH_WEIGHT_LABELS = {
+  resolutionRate:    'Resolution Rate',
+  satisfactionScore: 'Satisfaction Score',
+  slaCompliance:     'SLA Compliance',
+  escalationRate:    'Escalation Rate',
+  complaintVolume:   'Complaint Volume',
+};
+
+export const getHealthWeights = () => ok({ ...HEALTH_WEIGHTS });
+export const updateHealthWeights = (weights) => {
+  const total = Object.values(weights).reduce((s, n) => s + Number(n || 0), 0);
+  if (Math.round(total) !== 100) {
+    const err = new Error('Weights must total 100%');
+    err.response = { status: 400, data: { message: `Weights must total 100% (currently ${total}%).` } };
+    throw err;
+  }
+  HEALTH_WEIGHTS = { ...HEALTH_WEIGHTS, ...Object.fromEntries(Object.entries(weights).map(([k, v]) => [k, Number(v)])) };
+  return ok({ message: 'Branch Health Score weights updated', weights: { ...HEALTH_WEIGHTS } });
+};
+
 export const getBranchHealthScores = () => {
+  const w = HEALTH_WEIGHTS;
   const data = BRANCHES.map((b) => {
     const branchComplaints = COMPLAINTS.filter((c) => c.branch === b);
     const total = branchComplaints.length || 1;
@@ -1068,17 +1321,26 @@ export const getBranchHealthScores = () => {
     const surveys = branchComplaints.filter((c) => c.satisfaction).map((c) => c.satisfaction.rating);
     const avgCsat = surveys.length ? surveys.reduce((s, n) => s + n, 0) / surveys.length : 4.0;
 
-    const resolutionPart  = (resolved  / total) * 40;
-    const escalationPart  = (1 - escalated / total) * 15;
-    const csatPart        = (avgCsat / 5) * 25;
-    const slaPart         = Math.max(0, (1 - slaBreaches / Math.max(total, 1))) * 15;
-    const volumePart      = 5; // simplified — full impl would normalize by population
-    const score = Math.round(resolutionPart + escalationPart + csatPart + slaPart + volumePart);
+    // Each component normalised to 0..1, then weighted by the configurable weight.
+    const resolutionNorm  = resolved / total;
+    const csatNorm        = avgCsat / 5;
+    const slaNorm         = Math.max(0, 1 - slaBreaches / Math.max(total, 1));
+    const escalationNorm  = 1 - escalated / total;          // fewer escalations = healthier
+    const volumeNorm      = Math.max(0, 1 - branchComplaints.length / 60); // lighter load = healthier
+
+    const score = Math.round(
+      resolutionNorm * w.resolutionRate +
+      csatNorm       * w.satisfactionScore +
+      slaNorm        * w.slaCompliance +
+      escalationNorm * w.escalationRate +
+      volumeNorm     * w.complaintVolume
+    );
 
     return {
       branch: b,
       score,
       grade: score >= 85 ? 'A' : score >= 75 ? 'B' : score >= 65 ? 'C' : score >= 55 ? 'D' : 'F',
+      weights: { ...w },
       breakdown: {
         resolutionRate: Number((resolved  / total * 100).toFixed(1)),
         escalationRate: Number((escalated / total * 100).toFixed(1)),
@@ -1490,4 +1752,281 @@ export const simulateBirthdaySend = (userId) => {
     message: `Happy Birthday! 🎂 From your Portfolio Manager and the whole Ticano team. No one should be small forever — here's to another great year! ticanogroup.co.bw`,
     sentAt: new Date().toISOString(),
   });
+};
+
+// =====================================================================
+//  V3 ADDITIONS
+// =====================================================================
+
+// ---------------------------------------------------------------------
+//  §1 — PM ESCALATION RATE KPI
+//  (PM Escalated Complaints ÷ Total Assigned Complaints) × 100
+//  Visible to Service Manager, Admin, Director.
+// ---------------------------------------------------------------------
+const _pmRows = () => {
+  const map = {};
+  COMPLAINTS.forEach((c) => {
+    if (!c.assignedPmName) return;
+    const key = c.assignedPmId || c.assignedPmName;
+    if (!map[key]) map[key] = { pmId: c.assignedPmId, pm: c.assignedPmName, branch: c.branch, assigned: 0, escalated: 0, resolved: 0, resolvedNoEscalation: 0 };
+    map[key].assigned += 1;
+    const wasEscalated = c.status === 'escalated' || !!c.escalation;
+    if (wasEscalated) map[key].escalated += 1;
+    if (c.status === 'resolved' || c.status === 'closed') {
+      map[key].resolved += 1;
+      if (!wasEscalated) map[key].resolvedNoEscalation += 1;
+    }
+  });
+  return Object.values(map);
+};
+
+export const getPmEscalationRates = (filters = {}) => {
+  let rows = _pmRows();
+  if (filters.branch) rows = rows.filter((r) => r.branch === filters.branch);
+  const withRate = rows.map((r) => ({
+    ...r,
+    escalationRate: r.assigned ? Number(((r.escalated / r.assigned) * 100).toFixed(1)) : 0,
+  })).sort((a, b) => b.escalationRate - a.escalationRate);
+
+  const totalAssigned = withRate.reduce((s, r) => s + r.assigned, 0);
+  const totalEscalated = withRate.reduce((s, r) => s + r.escalated, 0);
+
+  return ok({
+    perPm: withRate,
+    branchAverage: totalAssigned ? Number(((totalEscalated / totalAssigned) * 100).toFixed(1)) : 0,
+    topPerformer: withRate.length ? withRate[withRate.length - 1] : null, // lowest rate
+    bottomPerformer: withRate.length ? withRate[0] : null,                // highest rate
+    // Period views (mock multipliers over the live monthly figure for trend display)
+    monthly:   totalAssigned ? Number(((totalEscalated / totalAssigned) * 100).toFixed(1)) : 0,
+    quarterly: totalAssigned ? Number(((totalEscalated / totalAssigned) * 100 * 0.92).toFixed(1)) : 0,
+    annual:    totalAssigned ? Number(((totalEscalated / totalAssigned) * 100 * 0.88).toFixed(1)) : 0,
+  });
+};
+
+// ---------------------------------------------------------------------
+//  §19 — FIRST CONTACT RESOLUTION RATE (FCR)
+//  (Complaints Resolved Without Escalation ÷ Total Complaints) × 100
+//  Visible to Service Manager, Admin, Director.
+// ---------------------------------------------------------------------
+export const getFcrRates = (filters = {}) => {
+  let pmRows = _pmRows();
+  if (filters.branch) pmRows = pmRows.filter((r) => r.branch === filters.branch);
+
+  const perPm = pmRows.map((r) => ({
+    pm: r.pm, branch: r.branch,
+    total: r.assigned,
+    resolvedNoEscalation: r.resolvedNoEscalation,
+    fcr: r.assigned ? Number(((r.resolvedNoEscalation / r.assigned) * 100).toFixed(1)) : 0,
+  })).sort((a, b) => b.fcr - a.fcr);
+
+  const byBranch = BRANCHES.map((b) => {
+    const items = COMPLAINTS.filter((c) => c.branch === b);
+    const total = items.length || 1;
+    const noEsc = items.filter((c) => (c.status === 'resolved' || c.status === 'closed') && !(c.status === 'escalated' || c.escalation)).length;
+    return { branch: b, total: items.length, resolvedNoEscalation: noEsc, fcr: Number(((noEsc / total) * 100).toFixed(1)) };
+  });
+
+  const total = COMPLAINTS.length || 1;
+  const companyNoEsc = COMPLAINTS.filter((c) => (c.status === 'resolved' || c.status === 'closed') && !(c.status === 'escalated' || c.escalation)).length;
+
+  return ok({
+    perPm,
+    byBranch,
+    companyWide: Number(((companyNoEsc / total) * 100).toFixed(1)),
+  });
+};
+
+// ---------------------------------------------------------------------
+//  §8 — MONTHLY CSAT REPORTING (replaces weekly)
+//  Current month, previous month, quarterly trend, annual trend.
+//  Available to Service Managers, Admin, Director.
+// ---------------------------------------------------------------------
+export const getMonthlyCsat = (filters = {}) => {
+  // Derive a current figure from live satisfaction surveys; surround with a
+  // mock historical series for the trend views.
+  const surveys = COMPLAINTS.filter((c) => c.satisfaction && (!filters.branch || c.branch === filters.branch))
+    .map((c) => c.satisfaction.rating);
+  const liveAvg = surveys.length ? Number((surveys.reduce((s, n) => s + n, 0) / surveys.length).toFixed(2)) : 4.2;
+
+  const monthly = [
+    { month: 'Jan', csat: 3.9, responses: 120 },
+    { month: 'Feb', csat: 4.0, responses: 134 },
+    { month: 'Mar', csat: 4.1, responses: 128 },
+    { month: 'Apr', csat: 4.0, responses: 141 },
+    { month: 'May', csat: 4.2, responses: 149 },
+    { month: 'Jun', csat: liveAvg, responses: 156 },
+  ];
+  const quarterly = [
+    { quarter: 'Q3 2025', csat: 3.8 }, { quarter: 'Q4 2025', csat: 3.9 },
+    { quarter: 'Q1 2026', csat: 4.0 }, { quarter: 'Q2 2026', csat: Number(((4.0 + 4.2 + liveAvg) / 3).toFixed(2)) },
+  ];
+  const annual = [
+    { year: '2023', csat: 3.6 }, { year: '2024', csat: 3.8 },
+    { year: '2025', csat: 4.0 }, { year: '2026', csat: liveAvg },
+  ];
+  return ok({
+    currentMonth: { label: 'June 2026', csat: liveAvg, responses: 156 },
+    previousMonth: { label: 'May 2026', csat: 4.2, responses: 149 },
+    quarterlyTrend: quarterly,
+    annualTrend: annual,
+    monthlyTrend: monthly,
+  });
+};
+
+// ---------------------------------------------------------------------
+//  §16 — CLIENT CAPACITY ALERTS
+//  Each PM has a configurable client-capacity limit. Alerts fire to the
+//  Service Manager + Admin when a PM hits capacity, and Smart Assignment
+//  avoids overloaded PMs.
+// ---------------------------------------------------------------------
+let PM_CAPACITY = {
+  2:  { pmId: 2,  pmName: 'Mojaboswa',        branch: 'Gaborone',    maxClients: 150, currentClients: 138 },
+  9:  { pmId: 9,  pmName: 'Onkarabile Sello', branch: 'Gaborone',    maxClients: 150, currentClients: 150 },
+  11: { pmId: 11, pmName: 'Kefilwe Moyo',     branch: 'Francistown', maxClients: 120, currentClients: 96  },
+  12: { pmId: 12, pmName: 'Tshepo Kgang',     branch: 'Palapye',     maxClients: 120, currentClients: 71  },
+  13: { pmId: 13, pmName: 'Lebogang Pule',    branch: 'Maun',        maxClients: 120, currentClients: 88  },
+};
+
+export const getPmCapacity = (filters = {}) => {
+  let rows = Object.values(PM_CAPACITY);
+  if (filters.branch) rows = rows.filter((r) => r.branch === filters.branch);
+  const withStatus = rows.map((r) => {
+    const utilisation = Math.round((r.currentClients / r.maxClients) * 100);
+    const atCapacity = r.currentClients >= r.maxClients;
+    const nearCapacity = !atCapacity && utilisation >= 90;
+    return { ...r, utilisation, atCapacity, nearCapacity };
+  });
+  return ok({
+    capacities: withStatus,
+    alerts: withStatus.filter((r) => r.atCapacity).map((r) => ({
+      pmName: r.pmName, branch: r.branch,
+      message: `PM ${r.pmName} has reached the maximum client capacity.`,
+      severity: 'high',
+    })),
+  });
+};
+
+export const setPmCapacity = (pmId, maxClients) => {
+  if (PM_CAPACITY[pmId]) PM_CAPACITY[pmId] = { ...PM_CAPACITY[pmId], maxClients: Number(maxClients) };
+  return ok({ message: 'Capacity limit updated', pmId, maxClients: Number(maxClients) });
+};
+
+// ---------------------------------------------------------------------
+//  §15 — WEEKLY ANALYTICS REPORTS
+//  Recipients: Director, Admin, Service Managers.
+// ---------------------------------------------------------------------
+export const getWeeklyReport = (filters = {}) => {
+  const scope = filters.branch ? COMPLAINTS.filter((c) => c.branch === filters.branch) : COMPLAINTS;
+  const byStatus = (s) => scope.filter((c) => c.status === s).length;
+  const surveys = scope.filter((c) => c.satisfaction).map((c) => c.satisfaction.rating);
+  const avgCsat = surveys.length ? Number((surveys.reduce((s, n) => s + n, 0) / surveys.length).toFixed(2)) : 4.2;
+  let pmRows = _pmRows();
+  if (filters.branch) pmRows = pmRows.filter((r) => r.branch === filters.branch);
+
+  return ok({
+    generatedAt: new Date().toISOString(),
+    period: 'Week of 16–22 June 2026',
+    scope: filters.branch || 'All branches',
+    complaints: {
+      new:       scope.filter((c) => c.status === 'created').length,
+      open:      scope.filter((c) => OPEN_COMPLAINT_STATUSES.includes(c.status)).length,
+      resolved:  byStatus('resolved'),
+      closed:    byStatus('closed'),
+      escalated: scope.filter((c) => c.status === 'escalated' || c.escalation).length,
+    },
+    satisfaction: { monthlyCsat: avgCsat, trend: 'improving' },
+    performance: {
+      pmRankings: pmRows.map((r) => ({
+        pm: r.pm, resolved: r.resolved, escalated: r.escalated,
+        escalationRate: r.assigned ? Number(((r.escalated / r.assigned) * 100).toFixed(1)) : 0,
+      })).sort((a, b) => b.resolved - a.resolved),
+      slaCompliancePct: 92.0,
+    },
+    branches: BRANCHES.map((b) => {
+      const items = COMPLAINTS.filter((c) => c.branch === b);
+      return { branch: b, complaints: items.length, escalated: items.filter((c) => c.escalation || c.status === 'escalated').length };
+    }),
+    delivery: ['Dashboard notification', 'Email report'],
+  });
+};
+
+// ---------------------------------------------------------------------
+//  §10 — REFERRAL NETWORK (referrer logging)
+// ---------------------------------------------------------------------
+let REFERRAL_LOG = [
+  { referrer: 'Refilwe Sento',    referred: 'Mpho Kgosi',       at: '2026-06-10T10:00:00' },
+  { referrer: 'Boitumelo Rantao', referred: 'Tshepo Molefe',    at: '2026-06-08T09:00:00' },
+  { referrer: 'Refilwe Sento',    referred: 'Neo Bareki',       at: '2026-05-30T14:00:00' },
+];
+const logReferral = (referrer, referred) => {
+  REFERRAL_LOG = [{ referrer, referred: referred || 'New customer', at: new Date().toISOString() }, ...REFERRAL_LOG];
+};
+
+export const getReferralLog = () => ok([...REFERRAL_LOG]);
+
+export const getReferralNetworkDashboard = () => {
+  const counts = {};
+  REFERRAL_LOG.forEach((r) => { counts[r.referrer] = (counts[r.referrer] || 0) + 1; });
+  const topReferrers = Object.entries(counts)
+    .map(([referrer, referrals]) => ({ referrer, referrals }))
+    .sort((a, b) => b.referrals - a.referrals);
+  return ok({
+    totalReferrals: REFERRAL_LOG.length,
+    topReferrers,
+    trend: [
+      { month: 'Mar', referrals: 18 }, { month: 'Apr', referrals: 24 },
+      { month: 'May', referrals: 31 }, { month: 'Jun', referrals: REFERRAL_LOG.length },
+    ],
+    growthPct: 22.4,
+    recent: REFERRAL_LOG.slice(0, 10),
+  });
+};
+
+// ---------------------------------------------------------------------
+//  §13 — EXCEL/CSV IMPORT FOR POTENTIAL CLIENTS
+//  Validates data, detects duplicates, imports valid records, returns a
+//  summary. (Parsing of the spreadsheet happens client-side; this endpoint
+//  receives an array of row objects.)
+// ---------------------------------------------------------------------
+export const importLeads = (rows = [], meta = {}) => {
+  const summary = { received: rows.length, imported: 0, duplicates: 0, invalid: 0, errors: [] };
+  const existingPhones = new Set(LEADS.map((l) => (l.phone || '').replace(/\s+/g, '')));
+  const seenInBatch = new Set();
+  const toAdd = [];
+
+  rows.forEach((row, i) => {
+    const firstName = (row.firstName || row['First Name'] || '').trim();
+    const lastName  = (row.lastName  || row['Last Name']  || '').trim();
+    const phone     = String(row.phone || row['Phone Number'] || '').trim();
+    const email     = (row.email || row['Email'] || '').trim();
+    const company   = (row.company || row['Company Name'] || '').trim();
+    const notes     = (row.notes || row['Notes'] || '').trim();
+    const name = `${firstName} ${lastName}`.trim();
+
+    if (!name || !phone) {
+      summary.invalid += 1;
+      summary.errors.push(`Row ${i + 2}: missing required name or phone.`);
+      return;
+    }
+    const normPhone = phone.replace(/\s+/g, '');
+    if (existingPhones.has(normPhone) || seenInBatch.has(normPhone)) {
+      summary.duplicates += 1;
+      return;
+    }
+    seenInBatch.add(normPhone);
+    toAdd.push({
+      id: Date.now() + i,
+      name, phone, email, company, notes,
+      branch: meta.branch || row.branch || 'Gaborone',
+      referralSource: 'System Import',
+      product: 'General Enquiry',
+      status: 'New',
+      addedBy: meta.addedBy || 'Bulk Import',
+      addedAt: new Date().toISOString(),
+    });
+  });
+
+  LEADS = [...toAdd, ...LEADS];
+  summary.imported = toAdd.length;
+  return ok({ message: `Imported ${summary.imported} of ${summary.received} records`, summary, leads: [...LEADS] });
 };

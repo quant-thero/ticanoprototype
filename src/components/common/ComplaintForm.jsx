@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import DocumentUpload from './DocumentUpload';
-import { Send, Lock, Info } from 'lucide-react';
+import { Send, Info } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
   JOURNEY_STAGES, COMPLAINT_CATEGORIES,
@@ -12,7 +12,7 @@ import {
  *
  * Implements:
  *   §1  — sets status to 'created'
- *   §2  — anonymous toggle (strict privacy)
+ *   §11 — anonymous complaints removed; formal complaints are always identifiable
  *   §14 — severity AND priority captured independently
  *   §18 — no document upload field
  */
@@ -23,7 +23,6 @@ export default function ComplaintForm({ onSubmit, clientType = 'existing', defau
     severity: 'moderate',
     priority: 'medium',
     description: '',
-    anonymous: false,
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -46,7 +45,6 @@ export default function ComplaintForm({ onSubmit, clientType = 'existing', defau
         severity: 'moderate',
         priority: 'medium',
         description: '',
-        anonymous: false,
       });
     } finally {
       setSubmitting(false);
@@ -126,25 +124,6 @@ export default function ComplaintForm({ onSubmit, clientType = 'existing', defau
           className={`${input} resize-none`}
         />
       </div>
-
-      {/* Anonymous toggle (§2) */}
-      <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors ${form.anonymous ? 'border-ticano-charcoal bg-gray-50 dark:bg-gray-800' : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}>
-        <input
-          type="checkbox"
-          checked={form.anonymous}
-          onChange={(e) => set('anonymous', e.target.checked)}
-          className="mt-1"
-        />
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <Lock size={14} className="text-ticano-charcoal dark:text-gray-300" />
-            <span className="font-medium text-ticano-charcoal dark:text-white">Submit as anonymous</span>
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Your name, phone and email will NOT be stored. You will receive an anonymous ID (e.g. ANON-000123) to track this complaint. No one — not even an administrator — can recover your identity.
-          </p>
-        </div>
-      </label>
 
       <button
         onClick={handleSubmit}

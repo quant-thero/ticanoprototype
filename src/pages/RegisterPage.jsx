@@ -10,7 +10,7 @@ import toast from 'react-hot-toast';
 export default function RegisterPage() {
   const [form, setForm] = useState({
     name: '', whatsappNumber: '', email: '', password: '', confirmPassword: '',
-    baseLocation: '', preferredBranch: '', referralSource: '', otherText: '',
+    baseLocation: '', preferredBranch: '', referralSource: '', otherText: '', referrerName: '',
     // §14 — DOB optional, only shown when user opts into birthday messages
     birthdayMessagesOptIn: false,
     birthday: '',
@@ -53,6 +53,7 @@ export default function RegisterPage() {
         locationSharingOptIn: form.locationSharingOptIn,
         preferredBranch: form.preferredBranch,
         referralSource,
+        referrerName: form.referrerName?.trim() || null,
         clientType,
       });
 
@@ -218,6 +219,18 @@ export default function RegisterPage() {
                 <label className={labelClass}>Please specify *</label>
                 <input type="text" required value={form.otherText} onChange={e => set('otherText', e.target.value)}
                   placeholder="Tell us how you heard about Ticano" className={inputClass} />
+              </div>
+            )}
+
+            {/* §10 — Referral Network: optional referrer name */}
+            {form.referralSource === 'Friend or Family Referral' && (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-gray-50/60 dark:bg-gray-800/40">
+                <label className={labelClass}>Would you like to tell us who referred you?</label>
+                <input type="text" value={form.referrerName} onChange={e => set('referrerName', e.target.value)}
+                  placeholder="Referrer's name (optional)" className={inputClass} />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Optional — it helps us thank the people who recommend us.
+                </p>
               </div>
             )}
 

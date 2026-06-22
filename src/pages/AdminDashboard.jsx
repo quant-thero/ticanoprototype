@@ -3,14 +3,14 @@ import { Users, GitBranch, Settings, Database, FileText, Activity, Plus, Trash2,
 import Navbar from '../components/common/Navbar';
 import { Badge, SearchFilters, ExportButton, LoadingSpinner, Modal } from '../components/common/UI';
 import KnowledgeBase from '../components/common/KnowledgeBase';
-import { getUsers, createUser, deleteUser, triggerBackup, getAuditTrail, getBranches, updateBranch, getWaTemplates, createWaTemplate, updateWaTemplate, deleteWaTemplate } from '../services/api';
+import { getUsers, createUser, deleteUser, triggerBackup, getAuditTrail, getBranches, updateBranch, createBranch, getWaTemplates, createWaTemplate, updateWaTemplate, deleteWaTemplate, setUserActive, changeUserRole, changeUserBranch, adminResetEmployeePassword, getUserActivity, updateUser, getHealthWeights, updateHealthWeights, HEALTH_WEIGHT_LABELS } from '../services/api';
 import AnnouncementBanner from '../components/common/AnnouncementBanner';
 import MaintenancePanel from '../components/common/MaintenancePanel';
 import { ROLES, BRANCHES, ROLE_LABELS } from '../utils/constants';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 
-const TABS = ['User Management', 'Branch Management', 'Knowledge Base', 'WhatsApp Templates', 'Maintenance', 'System Config', 'Database', 'Audit Logs', 'System Health'];
+const TABS = ['User Management', 'Branch Management', 'Branch Health Score', 'Knowledge Base', 'WhatsApp Templates', 'Maintenance', 'System Config', 'Database', 'Audit Logs', 'System Health'];
 const STAFF_ROLES = ['portfolio_manager', 'service_manager', 'director', 'marketing', 'admin'];
 
 export default function AdminDashboard() {
@@ -20,6 +20,12 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [showUserForm, setShowUserForm] = useState(false);
   const [userForm, setUserForm] = useState({ name: '', email: '', password: '', role: 'portfolio_manager', branch: '' });
+  const [filterRole, setFilterRole] = useState('');
+  const [filterBranch, setFilterBranch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [manageUser, setManageUser] = useState(null);
+
+  const refreshUsers = () => getUsers().then(({ data }) => setUsers(Array.isArray(data) ? data : (data?.users || []))).catch(() => {});
   const DEFAULT_BIRTHDAY_TEMPLATE = 'Happy Birthday [Name]! Ticano wishes you a wonderful day.';
   const [birthdayTemplate, setBirthdayTemplate] = useState(DEFAULT_BIRTHDAY_TEMPLATE);
   const [birthdayDraft, setBirthdayDraft] = useState(DEFAULT_BIRTHDAY_TEMPLATE);
@@ -37,9 +43,9 @@ export default function AdminDashboard() {
 
   const handleCreateUser = async () => {
     try {
-      const { data } = await createUser(userForm);
+      await createUser(userForm);
       toast.success('User created successfully');
-      setUsers((p) => [...p, data]);
+      await refreshUsers();
       setShowUserForm(false);
       setUserForm({ name: '', email: '', password: '', role: 'portfolio_manager', branch: '' });
     } catch (err) { toast.error(err.response?.data?.message || 'Failed to create user'); }
@@ -136,6 +142,23 @@ export default function AdminDashboard() {
               </div>
             )}
 
+            {/* §5 — Filters: role, branch, status */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              <select value={filterRole} onChange={(e) => setFilterRole(e.target.value)} className={`${inputCls} max-w-[180px]`}>
+                <option value="">All roles</option>
+                {STAFF_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+              </select>
+              <select value={filterBranch} onChange={(e) => setFilterBranch(e.target.value)} className={`${inputCls} max-w-[180px]`}>
+                <option value="">All branches</option>
+                {BRANCHES.map((b) => <option key={b} value={b}>{b}</option>)}
+              </select>
+              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={`${inputCls} max-w-[180px]`}>
+                <option value="">All statuses</option>
+                <option value="active">Active</option>
+                <option value="disabled">Disabled</option>
+              </select>
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -146,9 +169,14 @@ export default function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.length === 0 ? (
-                    <tr><td colSpan={7} className="py-8 text-center text-gray-400">No users found.</td></tr>
-                  ) : users.map((u) => (
+                  {(() => {
+                    const rows = users.filter((u) =>
+                      (!filterRole || u.role === filterRole) &&
+                      (!filterBranch || u.branch === filterBranch) &&
+                      (!filterStatus || (filterStatus === 'active' ? u.isActive : !u.isActive))
+                    );
+                    if (rows.length === 0) return (<tr><td colSpan={7} className="py-8 text-center text-gray-400">No users found.</td></tr>);
+                    return rows.map((u) => (
                     <tr key={u.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                       <td className="py-3 px-2 font-medium text-gray-800 dark:text-white">{u.name}</td>
                       <td className="py-3 px-2 text-gray-500">{u.email}</td>
@@ -156,18 +184,18 @@ export default function AdminDashboard() {
                       <td className="py-3 px-2 text-gray-500">{u.branch || '-'}</td>
                       <td className="py-3 px-2">
                         <span className={`px-2 py-0.5 rounded-full text-xs ${u.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                          {u.isActive ? 'Active' : 'Inactive'}
+                          {u.isActive ? 'Active' : 'Disabled'}
                         </span>
                       </td>
                       <td className="py-3 px-2 text-gray-400 text-xs">{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '-'}</td>
                       <td className="py-3 px-2">
-                        <div className="flex gap-2">
-                          <button className="text-ticano-red hover:text-ticano-red-dark"><Edit2 size={14} /></button>
-                          <button onClick={() => handleDeleteUser(u.id)} className="text-ticano-red hover:text-red-700"><Trash2 size={14} /></button>
-                        </div>
+                        <button onClick={() => setManageUser(u)} className="px-3 py-1.5 rounded-lg border border-ticano-charcoal text-ticano-charcoal dark:text-white dark:border-gray-500 text-xs hover:bg-gray-50 dark:hover:bg-gray-700">
+                          Manage
+                        </button>
                       </td>
                     </tr>
-                  ))}
+                    ));
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -176,6 +204,9 @@ export default function AdminDashboard() {
 
         {/* Branch Management */}
         {activeTab === 'Branch Management' && <BranchManagementTab />}
+
+        {/* §7 — Branch Health Score weights */}
+        {activeTab === 'Branch Health Score' && <BranchHealthWeightsTab />}
 
         {/* Knowledge Base (§8) — Admin has CRUD */}
         {activeTab === 'Knowledge Base' && (
@@ -309,6 +340,13 @@ export default function AdminDashboard() {
           </div>
         )}
       </div>
+
+      {/* §5 — Employee account management */}
+      <EmployeeManageModal
+        user={manageUser}
+        onClose={() => setManageUser(null)}
+        onChanged={refreshUsers}
+      />
     </div>
   );
 }
@@ -406,6 +444,7 @@ function BranchManagementTab() {
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
+  const [creating, setCreating] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -426,6 +465,9 @@ function BranchManagementTab() {
           <h3 className="font-bold text-ticano-charcoal dark:text-white text-lg">Branch Management</h3>
           <p className="text-xs text-gray-500">{branches.length} branches · click a card to edit details</p>
         </div>
+        <button onClick={() => setCreating(true)} className="flex items-center gap-2 px-4 py-2 bg-ticano-red text-white rounded-xl text-sm font-medium hover:bg-ticano-red-dark">
+          <Plus size={16} /> New Branch
+        </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -464,7 +506,61 @@ function BranchManagementTab() {
         onClose={() => setEditing(null)}
         onSaved={() => { setEditing(null); load(); }}
       />
+      <BranchCreateModal
+        open={creating}
+        onClose={() => setCreating(false)}
+        onCreated={() => { setCreating(false); load(); }}
+      />
     </div>
+  );
+}
+
+// §4 — Create a new branch.
+function BranchCreateModal({ open, onClose, onCreated }) {
+  const [form, setForm] = useState({ name: '', code: '', region: '', address: '', phone: '', email: '', manager: '', status: 'active' });
+  useEffect(() => { if (open) setForm({ name: '', code: '', region: '', address: '', phone: '', email: '', manager: '', status: 'active' }); }, [open]);
+
+  const input = 'w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-ticano-red';
+  const label = 'text-xs uppercase tracking-wide text-gray-500';
+
+  const save = () => {
+    if (!form.name.trim()) return toast.error('Branch name is required');
+    if (!form.code.trim()) return toast.error('Branch code is required');
+    createBranch({ ...form, city: form.name }).then(({ data }) => {
+      toast.success(`${data.branch.name} created`);
+      onCreated();
+    });
+  };
+
+  return (
+    <Modal isOpen={open} onClose={onClose} title="New Branch"
+      footer={<>
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300">Cancel</button>
+        <button onClick={save} className="px-4 py-2 text-sm rounded-lg bg-ticano-red text-white hover:bg-ticano-red-dark">Save Branch</button>
+      </>}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className={label}>Branch Name *</label><input className={input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+          <div><label className={label}>Branch Code *</label><input className={input} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="e.g. GAB-02" /></div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className={label}>Region</label><input className={input} value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} /></div>
+          <div><label className={label}>Contact Number</label><input className={input} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+267 …" /></div>
+        </div>
+        <div><label className={label}>Physical Address</label><input className={input} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className={label}>Branch Email</label><input type="email" className={input} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+          <div><label className={label}>Assigned Service Manager</label><input className={input} value={form.manager} onChange={(e) => setForm({ ...form, manager: e.target.value })} /></div>
+        </div>
+        <div>
+          <label className={label}>Status</label>
+          <select className={input} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -677,6 +773,188 @@ function WaTemplatesTab() {
             <p className="text-[10px] text-gray-400 mt-2">Updated {new Date(t.lastUpdated).toLocaleDateString()}</p>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+//  §5 — Employee Account Management modal
+//  Edit, Disable/Enable, Reset Password, Change Role, Change Branch,
+//  View Activity, View Audit History.
+// ---------------------------------------------------------------------
+function EmployeeManageModal({ user, onClose, onChanged }) {
+  const [tab, setTab] = useState('details');
+  const [role, setRole] = useState('');
+  const [branch, setBranch] = useState('');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [tempPw, setTempPw] = useState('');
+  const [activity, setActivity] = useState(null);
+
+  useEffect(() => {
+    if (!user) return;
+    setTab('details');
+    setRole(user.role); setBranch(user.branch || ''); setName(user.name); setEmail(user.email);
+    setTempPw(''); setActivity(null);
+  }, [user?.id]);
+
+  if (!user) return null;
+  const inp = 'w-full border border-gray-300 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm bg-white dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-ticano-red';
+
+  const saveDetails = async () => {
+    try {
+      await updateUser(user.id, { name, email });
+      if (role !== user.role) await changeUserRole(user.id, role);
+      if (branch !== user.branch) await changeUserBranch(user.id, branch);
+      toast.success('Employee updated');
+      onChanged(); onClose();
+    } catch (e) { toast.error(e.response?.data?.message || 'Update failed'); }
+  };
+  const toggleActive = async () => {
+    try { await setUserActive(user.id, !user.isActive); toast.success(user.isActive ? 'Account disabled' : 'Account enabled'); onChanged(); onClose(); }
+    catch { toast.error('Action failed'); }
+  };
+  const resetPw = async () => {
+    try { const { data } = await adminResetEmployeePassword(user.id); setTempPw(data.tempPassword); toast.success('Temporary password generated'); }
+    catch { toast.error('Could not reset password'); }
+  };
+  const loadActivity = async () => {
+    try { const { data } = await getUserActivity(user.id); setActivity(data); } catch {}
+  };
+
+  return (
+    <Modal isOpen={!!user} onClose={onClose} title={`Manage — ${user.name}`} size="lg">
+      <div className="flex gap-2 mb-4 flex-wrap">
+        {[['details', 'Edit Details'], ['role', 'Role & Branch'], ['security', 'Password'], ['activity', 'Activity & Audit']].map(([id, label]) => (
+          <button key={id} onClick={() => { setTab(id); if (id === 'activity') loadActivity(); }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium ${tab === id ? 'bg-ticano-charcoal text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'details' && (
+        <div className="space-y-3">
+          <div><label className="block text-xs font-medium text-gray-500 mb-1">Full Name</label><input value={name} onChange={(e) => setName(e.target.value)} className={inp} /></div>
+          <div><label className="block text-xs font-medium text-gray-500 mb-1">Email</label><input value={email} onChange={(e) => setEmail(e.target.value)} className={inp} /></div>
+          <button onClick={saveDetails} className="px-5 py-2 bg-ticano-red text-white rounded-lg text-sm font-medium hover:bg-ticano-red-dark">Save changes</button>
+        </div>
+      )}
+
+      {tab === 'role' && (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
+            <select value={role} onChange={(e) => setRole(e.target.value)} className={inp}>
+              {STAFF_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Branch</label>
+            <select value={branch} onChange={(e) => setBranch(e.target.value)} className={inp}>
+              <option value="">Head Office</option>
+              {BRANCHES.map((b) => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
+          <button onClick={saveDetails} className="px-5 py-2 bg-ticano-red text-white rounded-lg text-sm font-medium hover:bg-ticano-red-dark">Apply role / branch</button>
+        </div>
+      )}
+
+      {tab === 'security' && (
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600 dark:text-gray-300">Employees cannot self-reset. Generate a temporary password the employee must change on next login.</p>
+          <button onClick={resetPw} className="px-5 py-2 bg-ticano-charcoal text-white rounded-lg text-sm font-medium hover:bg-black">Reset Password</button>
+          {tempPw && (
+            <div className="rounded-xl border border-green-200 bg-green-50 dark:bg-green-900/20 dark:border-green-700 p-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Temporary password (share securely):</p>
+              <p className="font-mono text-lg font-bold text-green-700 dark:text-green-400">{tempPw}</p>
+            </div>
+          )}
+          <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+            <button onClick={toggleActive} className={`px-5 py-2 rounded-lg text-sm font-medium text-white ${user.isActive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}>
+              {user.isActive ? 'Disable Account' : 'Enable Account'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {tab === 'activity' && (
+        <div className="space-y-4">
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Recent activity</h4>
+            {!activity ? <p className="text-xs text-gray-400">Loading…</p> : activity.activity.length === 0 ? (
+              <p className="text-xs text-gray-400">No recorded activity.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {activity.activity.map((a, i) => (
+                  <li key={i} className="text-xs text-gray-600 dark:text-gray-300 flex justify-between border-b border-gray-50 dark:border-gray-800 pb-1">
+                    <span>{a.action}</span><span className="text-gray-400">{new Date(a.at).toLocaleString()}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {activity && activity.complaintAudit?.length > 0 && (
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Complaint audit history</h4>
+              <ul className="space-y-1.5">
+                {activity.complaintAudit.slice(0, 10).map((a) => (
+                  <li key={a.id} className="text-xs text-gray-600 dark:text-gray-300 flex justify-between">
+                    <span>{a.ticket} — {a.action}</span><span className="text-gray-400">{new Date(a.at).toLocaleDateString()}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------
+//  §7 — Branch Health Score weight configuration (must total 100%)
+// ---------------------------------------------------------------------
+function BranchHealthWeightsTab() {
+  const [weights, setWeights] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { getHealthWeights().then(({ data }) => setWeights(data)); }, []);
+  if (!weights) return <LoadingSpinner />;
+
+  const total = Object.values(weights).reduce((s, n) => s + Number(n || 0), 0);
+  const valid = Math.round(total) === 100;
+
+  const save = async () => {
+    setSaving(true);
+    try { const { data } = await updateHealthWeights(weights); setWeights(data.weights); toast.success('Weights saved'); }
+    catch (e) { toast.error(e.response?.data?.message || 'Could not save'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="bg-white dark:bg-ticano-dark-card rounded-2xl shadow p-6 max-w-2xl">
+      <h3 className="font-bold text-ticano-charcoal dark:text-white text-lg mb-1">Branch Health Score Weights</h3>
+      <p className="text-sm text-gray-500 mb-5">Configure how each metric contributes to the Branch Health Score. Weights must total exactly 100%.</p>
+      <div className="space-y-4">
+        {Object.keys(weights).map((k) => (
+          <div key={k} className="flex items-center gap-4">
+            <label className="flex-1 text-sm text-gray-700 dark:text-gray-200">{HEALTH_WEIGHT_LABELS[k] || k}</label>
+            <input type="range" min="0" max="100" value={weights[k]} onChange={(e) => setWeights((w) => ({ ...w, [k]: Number(e.target.value) }))} className="flex-1 accent-[#CE313C]" />
+            <input type="number" min="0" max="100" value={weights[k]} onChange={(e) => setWeights((w) => ({ ...w, [k]: Number(e.target.value) }))}
+              className="w-16 border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 text-sm text-right bg-white dark:bg-gray-800 dark:text-white" />
+            <span className="text-gray-400 text-sm w-4">%</span>
+          </div>
+        ))}
+      </div>
+      <div className={`mt-5 flex items-center justify-between p-3 rounded-xl ${valid ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
+        <span className={`text-sm font-medium ${valid ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+          Total: {total}% {valid ? '✓' : '— must equal 100%'}
+        </span>
+        <button onClick={save} disabled={!valid || saving} className="px-5 py-2 bg-ticano-red text-white rounded-lg text-sm font-medium hover:bg-ticano-red-dark disabled:opacity-50">
+          {saving ? 'Saving…' : 'Save weights'}
+        </button>
       </div>
     </div>
   );

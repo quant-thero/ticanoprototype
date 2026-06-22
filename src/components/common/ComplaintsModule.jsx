@@ -4,7 +4,7 @@ import {
   assignComplaint, reassignComplaint, reassignComplaintToNew, updateComplaintStatus,
   addInternalNote, addCustomerNote, updateSentiment,
   escalateComplaint, resolveComplaint, closeComplaint,
-  recommendPm, getAuditTrail,
+  recommendPm, getAuditTrail, escalationTargetForRole,
 } from '../../services/api';
 import {
   COMPLAINT_STATUSES, complaintStatusLabel, JOURNEY_STAGE_LABEL,
@@ -378,7 +378,9 @@ function ComplaintDetail({
           <div className="flex items-start gap-3">
             <AlertTriangle className="text-orange-600 flex-shrink-0 mt-1" size={20} />
             <div className="flex-1">
-              <p className="font-semibold text-orange-900 dark:text-orange-200">Escalated to Management</p>
+              <p className="font-semibold text-orange-900 dark:text-orange-200">
+                {c.escalation.toLabel ? `Escalated to ${c.escalation.toLabel}` : 'Escalated'}
+              </p>
               <p className="text-sm text-orange-800 dark:text-orange-300 mt-1">{c.escalation.reason}</p>
               <p className="text-xs text-orange-600 dark:text-orange-400 mt-2">
                 {new Date(c.escalation.at).toLocaleString()} · by {c.escalation.by}
@@ -446,11 +448,14 @@ function ComplaintDetail({
               Awaiting Customer
             </button>
           )}
-          {canEscalate && c.status !== 'escalated' && (
-            <button onClick={onEscalate} className="px-4 py-2 rounded-lg border border-orange-400 text-orange-700 text-sm hover:bg-orange-50 flex items-center gap-1.5">
-              <ArrowUpCircle size={14} /> Escalate
-            </button>
-          )}
+          {canEscalate && c.status !== 'escalated' && (() => {
+            const target = escalationTargetForRole(currentUser?.role);
+            return (
+              <button onClick={onEscalate} className="px-4 py-2 rounded-lg border border-orange-400 text-orange-700 text-sm hover:bg-orange-50 flex items-center gap-1.5">
+                <ArrowUpCircle size={14} /> {target ? `Escalate to ${target.label}` : 'Escalate'}
+              </button>
+            );
+          })()}
           {canResolve && c.status !== 'resolved' && (
             <button onClick={onResolve} className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm hover:bg-green-700 flex items-center gap-1.5">
               <CheckCircle2 size={14} /> Mark Resolved
@@ -633,27 +638,31 @@ function AssignModalContent({ isOpen, onClose, complaint, onAssigned }) {
 // ---------------------------------------------------------------------
 function EscalateModalContent({ isOpen, onClose, complaint, currentUser, onEscalated }) {
   const [reason, setReason] = useState('');
+  const target = escalationTargetForRole(currentUser?.role);
+  const targetLabel = target?.label || 'the next level';
   const handle = () => {
     if (!reason.trim()) return toast.error('Please provide an escalation reason');
-    escalateComplaint(complaint.id, { reason, by: currentUser?.name || 'Staff' })
-      .then(() => { toast.success(`${complaint.ticket} escalated`); onEscalated(); })
+    escalateComplaint(complaint.id, { reason, by: currentUser?.name || 'Staff', fromRole: currentUser?.role })
+      .then(() => { toast.success(`${complaint.ticket} escalated to ${targetLabel}`); onEscalated(); })
       .catch((e) => toast.error(e.response?.data?.message || 'Could not escalate'));
   };
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Escalate to Management">
+    <Modal isOpen={isOpen} onClose={onClose} title={`Escalate to ${targetLabel}`}>
       <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-        This will route the case to the Service Manager and Director. Reason is required.
+        {currentUser?.role === 'service_manager'
+          ? 'This routes the case up to the Director. A reason is required and recorded permanently.'
+          : 'This routes the case to your branch Service Manager. A reason is required and recorded permanently.'}
       </p>
       <textarea
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         rows={4}
-        placeholder="Why does this need management attention?"
+        placeholder="Why does this need to be escalated?"
         className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
       />
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-300 text-sm">Cancel</button>
-        <button onClick={handle} className="px-4 py-2 rounded-lg bg-orange-600 text-white text-sm">Escalate</button>
+        <button onClick={handle} className="px-4 py-2 rounded-lg bg-orange-600 text-white text-sm">Escalate to {targetLabel}</button>
       </div>
     </Modal>
   );

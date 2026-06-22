@@ -179,9 +179,10 @@ export function EmptyState({ title='Nothing here yet', message='There is no data
 }
 
 // Modal — with animation
-export function Modal({ isOpen, onClose, title, children, size = 'md' }) {
+export function Modal({ isOpen, open, onClose, title, children, footer, size = 'md' }) {
+  const visible = isOpen ?? open;
   const sizeMap = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', full: 'max-w-6xl' };
-  if (!isOpen) return null;
+  if (!visible) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={onClose} />
@@ -195,6 +196,11 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }) {
           </div>
         )}
         <div className="p-6">{children}</div>
+        {footer && (
+          <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100 dark:border-gray-700 sticky bottom-0 bg-white dark:bg-ticano-dark-card">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

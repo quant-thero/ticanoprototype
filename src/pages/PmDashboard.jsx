@@ -154,7 +154,7 @@ export default function PmDashboard() {
         {tab === 'complaints' && (
           <ComplaintsModule
             scope="mine"
-            currentUser={{ id: user?.id || 2, name: user?.name || 'Mojaboswa' }}
+            currentUser={{ id: user?.id || 2, name: user?.name || 'Mojaboswa', role: 'portfolio_manager', branch: user?.branch }}
             canAssign={false}
             canEscalate={true}
             canResolve={true}

@@ -27,10 +27,10 @@ const HERO_GRADIENT = 'bg-gradient-to-br from-ticano-charcoal via-[#4a4647] to-t
 
 const tabsForLang = (t) => [
   { id: 'overview',   label: t('Overview'),           icon: User },
+  { id: 'feedback',   label: t('Feedback History'),   icon: Star },
   { id: 'complaints', label: t('My Complaints'),      icon: ShieldAlert },
   { id: 'submit',     label: t('Submit a Complaint'), icon: MessageSquare },
   { id: 'improve',    label: t('Improve Ticano'),     icon: Lightbulb },
-  { id: 'feedback',   label: t('Feedback History'),   icon: Star },
   { id: 'appointments', label: t('Appointments'),        icon: Calendar },
   { id: 'branches',     label: t('Find a Branch'),      icon: MapPin },
   { id: 'birthday',   label: t('Birthday Messages'),  icon: Cake },
@@ -47,10 +47,6 @@ export default function ClientDashboard() {
   const [complaints, setComplaints] = useState([]);
   const [openComplaint, setOpenComplaint] = useState(null);
   const [loading, setLoading] = useState(true);
-
-  const [rating, setRating] = useState(0);
-  const [comment, setComment] = useState('');
-  const [submitting, setSubmitting] = useState(false);
 
   const reload = async () => {
     const [p, f, c] = await Promise.all([getProfile(), getMyFeedback(), getMyComplaints(1)]);
@@ -74,15 +70,28 @@ export default function ClientDashboard() {
     } catch { toast.error('Failed to update preference'); }
   };
 
-  const handleRatingSubmit = async () => {
-    if (!rating) return toast.error('Please select a rating');
-    setSubmitting(true);
+  // Addendum §1/§2 — a single submit path shared by the Overview "Rate Your
+  // Last Experience" card and the Feedback History tab. Both write to the same
+  // `feedback` state, so a rating submitted in one place appears immediately in
+  // the other with no duplication.
+  const handleRatingSubmit = async ({ rating, comment }) => {
+    if (!rating) { toast.error('Please select a rating'); return false; }
     try {
       await submitRating({ rating, comment });
-      toast.success('Rating submitted! Thank you.');
-      setRating(0); setComment('');
-    } catch { toast.error('Failed to submit rating'); }
-    finally { setSubmitting(false); }
+      const entry = {
+        id: `local-${Date.now()}`,
+        rating,
+        comment,
+        createdAt: new Date().toISOString(),
+        branch: profile?.preferredBranch || user?.branch || 'Gaborone',
+      };
+      setFeedback((prev) => [entry, ...prev]);
+      toast.success('Thank you! Your feedback has been recorded.');
+      return true;
+    } catch {
+      toast.error('Failed to submit rating');
+      return false;
+    }
   };
 
   const handleComplaintSubmit = async (form) => {
@@ -171,6 +180,11 @@ export default function ClientDashboard() {
               </div>
               <UserCheck className="text-ticano-red" size={22} />
             </div>
+
+            {/* Addendum §1 — Rate Your Last Experience (syncs to Feedback History) */}
+            <Card title="Rate Your Last Experience" subtitle="Your rating is saved to your Feedback History">
+              <RateExperience onSubmit={handleRatingSubmit} compact />
+            </Card>
 
             {/* Most recent complaint */}
             {complaints[0] && (
@@ -270,21 +284,10 @@ export default function ClientDashboard() {
               </div>
             )}
 
-            {/* Rate experience */}
+            {/* Rate experience — shares state with the Overview card */}
             <div className="mt-5 pt-5 border-t border-gray-100 dark:border-gray-700">
               <h4 className="font-semibold text-ticano-charcoal dark:text-white mb-3">Rate your last experience</h4>
-              <div className="flex gap-3 mb-3">
-                {[1,2,3,4,5].map(s => (
-                  <button key={s} onClick={() => setRating(s)} className="text-3xl transition-transform hover:scale-110"
-                    style={{ color: s <= rating ? '#FFC107' : '#D1D5DB' }}>★</button>
-                ))}
-              </div>
-              <textarea value={comment} onChange={e => setComment(e.target.value)} rows={3}
-                placeholder="Additional comments..." className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 text-sm bg-white dark:bg-gray-800 dark:text-white resize-none focus:outline-none focus:ring-2 focus:ring-ticano-red mb-3" />
-              <button onClick={handleRatingSubmit} disabled={submitting}
-                className="w-full sm:w-auto px-6 py-2.5 bg-ticano-red text-white rounded-xl font-medium text-sm hover:bg-ticano-red-dark transition-colors disabled:opacity-60">
-                Submit Rating
-              </button>
+              <RateExperience onSubmit={handleRatingSubmit} compact />
             </div>
           </Card>
         )}
@@ -361,6 +364,43 @@ function Stat({ label, value }) {
     <div className="bg-white/10 backdrop-blur rounded-xl px-4 py-2.5">
       <p className="text-2xl font-bold leading-tight">{value}</p>
       <p className="text-xs text-white/70">{label}</p>
+    </div>
+  );
+}
+
+// Addendum §1 — "Rate Your Last Experience". Self-contained widget with its
+// own local state; on success it clears and calls onSubmit (which syncs the
+// shared feedback list used by both the Overview and Feedback History tabs).
+function RateExperience({ onSubmit, compact = false }) {
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    setSubmitting(true);
+    const okResult = await onSubmit({ rating, comment });
+    setSubmitting(false);
+    if (okResult) { setRating(0); setComment(''); }
+  };
+
+  return (
+    <div>
+      {!compact && <h4 className="font-semibold text-ticano-charcoal dark:text-white mb-1">Rate Your Last Experience</h4>}
+      {!compact && <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">How was your most recent interaction with Ticano?</p>}
+      <div className="flex gap-3 mb-3">
+        {[1, 2, 3, 4, 5].map((s) => (
+          <button key={s} type="button" onClick={() => setRating(s)} aria-label={`${s} star${s > 1 ? 's' : ''}`}
+            className="text-3xl transition-transform hover:scale-110"
+            style={{ color: s <= rating ? '#FFC107' : '#D1D5DB' }}>★</button>
+        ))}
+      </div>
+      <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={3}
+        placeholder="Additional comments (optional)…"
+        className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 text-sm bg-white dark:bg-gray-800 dark:text-white resize-none focus:outline-none focus:ring-2 focus:ring-ticano-red mb-3" />
+      <button onClick={submit} disabled={submitting || !rating}
+        className="w-full sm:w-auto px-6 py-2.5 bg-ticano-red text-white rounded-xl font-medium text-sm hover:bg-ticano-red-dark transition-colors disabled:opacity-60">
+        {submitting ? 'Submitting…' : 'Submit Rating'}
+      </button>
     </div>
   );
 }

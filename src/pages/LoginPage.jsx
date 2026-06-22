@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Eye, EyeOff, Lock, User, ArrowRight, ChevronRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { login } from '../services/api';
+import { login, requestCustomerPasswordReset } from '../services/api';
 import Logo from '../components/common/Logo';
 import TwoFactorAuth from '../components/common/TwoFactorAuth';
+import { Modal } from '../components/common/UI';
 import toast from 'react-hot-toast';
 
 const DEMO_ACCOUNTS = [
@@ -25,10 +26,28 @@ export default function LoginPage() {
   const [show2FA, setShow2FA]       = useState(false);
   const [pendingUser, setPendingUser] = useState(null);
   const [mounted, setMounted]       = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetting, setResetting]   = useState(false);
   const { login: authLogin }        = useAuth();
   const navigate                    = useNavigate();
 
   useEffect(() => { setMounted(true); }, []);
+
+  const handleForgot = async () => {
+    if (!resetEmail.trim()) return toast.error('Please enter your account email');
+    setResetting(true);
+    try {
+      const { data } = await requestCustomerPasswordReset(resetEmail.trim());
+      toast.success(data.message);
+      setShowForgot(false);
+      setResetEmail('');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not start password reset');
+    } finally {
+      setResetting(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -200,6 +219,12 @@ export default function LoginPage() {
                     {showPass ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                 </div>
+                <div className="text-right mt-2">
+                  <button type="button" onClick={() => { setResetEmail(identifier); setShowForgot(true); }}
+                    className="text-xs text-white/40 hover:text-ticano-red transition-colors">
+                    Forgot Password?
+                  </button>
+                </div>
               </div>
 
               <button type="submit" disabled={loading}
@@ -242,6 +267,34 @@ export default function LoginPage() {
           </div>
         </div>
       </div>
+
+      {/* §6 — Forgot Password */}
+      <Modal isOpen={showForgot} onClose={() => setShowForgot(false)} title="Reset your password" size="sm">
+        <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+          Customers can reset their password via email verification. Enter the email on your account
+          and we'll send you a secure reset link.
+        </p>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Account email</label>
+        <input
+          type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)}
+          placeholder="email@company.com"
+          className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-ticano-red"
+        />
+        <div className="mt-3 rounded-xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-700 p-3">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            <strong>Staff accounts</strong> can't be self-reset. Ask your administrator to issue a
+            temporary password (e.g. <span className="font-mono">TCN-Temp-4582</span>), which you'll
+            change on next login.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2 mt-4">
+          <button onClick={() => setShowForgot(false)} className="px-4 py-2 rounded-xl border border-gray-300 dark:border-gray-600 text-sm">Cancel</button>
+          <button onClick={handleForgot} disabled={resetting}
+            className="px-4 py-2 rounded-xl bg-ticano-red text-white text-sm font-medium disabled:opacity-60">
+            {resetting ? 'Sending…' : 'Send reset link'}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -21,11 +21,12 @@ import WhatsAppSimulator from '../components/common/WhatsAppSimulator';
 import BranchLeaderboard from '../components/common/BranchLeaderboard';
 import EmailNotifications from '../components/common/EmailNotifications';
 import AnnouncementBanner from '../components/common/AnnouncementBanner';
+import PerformanceKpis from '../components/common/PerformanceKpis';
 import { formatPercent, formatDate, formatDateTime } from '../utils/format';
 import { CLIENT_TYPE_LABEL, JOURNEY_STAGE_LABEL, complaintStatusLabel, OPEN_COMPLAINT_STATUSES } from '../utils/constants';
 import toast from 'react-hot-toast';
 
-const TABS = ['Overview', 'Complaints', 'Aging', 'Escalations', 'Improvement Feedback', 'Knowledge Base', 'Active Clients', 'Leads', 'Appointments', 'Unassigned', 'Staff Performance', 'Analytics', 'Reports', 'Charts', 'WhatsApp', 'Email'];
+const TABS = ['Overview', 'Complaints', 'Performance KPIs', 'Aging', 'Escalations', 'Improvement Feedback', 'Knowledge Base', 'Active Clients', 'Leads', 'Appointments', 'Unassigned', 'Staff Performance', 'Analytics', 'Reports', 'Charts', 'WhatsApp', 'Email'];
 const RED = '#CE313C';
 const GRAY = '#808686';
 const COLORS = ['#CE313C', '#808686', '#a6abab', '#373435', '#a8252f'];
@@ -162,7 +163,7 @@ export default function ServiceManagerDashboard() {
         {activeTab === 'Complaints' && (
           <ComplaintsModule
             scope="all"
-            currentUser={{ id: user?.id, name: user?.name }}
+            currentUser={{ id: user?.id, name: user?.name, role: 'service_manager', branch: user?.branch }}
             canAssign={true}
             canEscalate={true}
             canResolve={true}
@@ -173,6 +174,9 @@ export default function ServiceManagerDashboard() {
 
         {/* ---------- AGING DASHBOARD (§9) ---------- */}
         {activeTab === 'Aging' && <AgingTab />}
+
+        {/* §1/§8/§15/§16/§19 — Performance KPIs, restricted to this branch (§9) */}
+        {activeTab === 'Performance KPIs' && <PerformanceKpis branch={user?.branch} scopeLabel={`${user?.branch} branch`} />}
 
         {/* ---------- IMPROVEMENT FEEDBACK (§3) ---------- */}
         {activeTab === 'Improvement Feedback' && <ImprovementFeedbackTab />}
