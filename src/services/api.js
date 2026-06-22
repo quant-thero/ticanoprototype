@@ -1333,17 +1333,58 @@ export const deleteAnnouncement = (id) => {
 };
 
 // --- WhatsApp Templates ---
+// Templates are role-specific — returned based on requesting role
+const WA_TEMPLATES_BY_ROLE = {
+  // Admin — internal/technical only
+  admin: [
+    { id: 101, name: 'System Maintenance Notice', key: 'maintenance', body: 'Hi [Name], the Ticano system will be under maintenance on [Date] from [Start] to [End]. Please save your work before this time. — Ticano IT Admin', variables: ['Name','Date','Start','End'], active: true, lastUpdated: '2026-06-01T10:00:00' },
+    { id: 102, name: 'New User Account Created', key: 'new_user', body: 'Hi [Name], your Ticano system account has been created. Username: [Email]. Please log in and change your password immediately. — Ticano Admin', variables: ['Name','Email'], active: true, lastUpdated: '2026-05-20T10:00:00' },
+    { id: 103, name: 'Password Reset Instructions', key: 'password_reset', body: 'Hi [Name], a password reset was requested for your Ticano account. If this was you, click [Link] to set a new password. If not, contact IT immediately.', variables: ['Name','Link'], active: true, lastUpdated: '2026-04-10T10:00:00' },
+    { id: 104, name: 'Security Alert', key: 'security_alert', body: 'SECURITY ALERT: Unusual login activity detected on the Ticano system for [User] on [Date] at [Time]. Please review the audit trail and take action if needed.', variables: ['User','Date','Time'], active: true, lastUpdated: '2026-03-15T10:00:00' },
+    { id: 105, name: 'Database Backup Confirmation', key: 'db_backup', body: 'Hi [Name], the scheduled database backup completed successfully on [Date] at [Time]. Backup size: [Size]. Next backup: [Next]. — Ticano System', variables: ['Name','Date','Time','Size','Next'], active: true, lastUpdated: '2026-02-28T10:00:00' },
+    { id: 106, name: 'IT Support Response', key: 'it_support', body: 'Hi [Name], your IT support request [Ticket] has been received. Our team will respond within [SLA]. Reference: [Ticket]. — Ticano IT Team', variables: ['Name','Ticket','SLA'], active: true, lastUpdated: '2026-01-15T10:00:00' },
+  ],
+  // PM — client-facing only
+  portfolio_manager: [
+    { id: 201, name: 'Complaint Received', key: 'complaint_received', body: 'Hi [Name], your complaint has been received and assigned ticket number [Ticket]. I am [PM] and I will be handling your case. I will be in touch within 24 hours.', variables: ['Name','Ticket','PM'], active: true, lastUpdated: '2026-06-01T10:00:00' },
+    { id: 202, name: 'Appointment Reminder', key: 'appointment_reminder', body: 'Hi [Name], this is a reminder of your appointment with me tomorrow at [Time] at our [Branch] branch. Reply CONFIRM to confirm or call me to reschedule.', variables: ['Name','Time','Branch'], active: true, lastUpdated: '2026-05-15T10:00:00' },
+    { id: 203, name: 'Document Request', key: 'document_request', body: 'Hi [Name], to continue processing your [Product] application, I need the following documents: [Documents]. Please bring or send them at your earliest convenience. — [PM]', variables: ['Name','Product','Documents','PM'], active: true, lastUpdated: '2026-04-22T10:00:00' },
+    { id: 204, name: 'Application Update', key: 'application_update', body: 'Hi [Name], I wanted to update you on your [Product] application. Current status: [Status]. Next step: [Next]. Feel free to reply if you have questions. — [PM]', variables: ['Name','Product','Status','Next','PM'], active: true, lastUpdated: '2026-03-10T10:00:00' },
+    { id: 205, name: 'Follow-up Check-in', key: 'followup', body: 'Hi [Name], just checking in to see how everything is going with your Ticano account. Is there anything I can help you with? — [PM], your Portfolio Manager', variables: ['Name','PM'], active: true, lastUpdated: '2026-02-20T10:00:00' },
+    { id: 206, name: 'Review Request', key: 'review_request', body: 'Hi [Name], thank you for allowing us to assist you. Your feedback means a lot to us! Please share your experience: [Link]. It only takes 2 minutes. — [PM]', variables: ['Name','Link','PM'], active: true, lastUpdated: '2026-01-15T10:00:00' },
+    { id: 207, name: 'Birthday Greeting', key: 'birthday', body: 'Happy Birthday [Name]! 🎂 Wishing you a wonderful day. From your Portfolio Manager and the whole Ticano team. ticanogroup.co.bw', variables: ['Name'], active: true, lastUpdated: '2026-05-10T10:00:00' },
+  ],
+  // Service Manager — operational
+  service_manager: [
+    { id: 301, name: 'Escalation Notice to Client', key: 'escalation_client', body: 'Dear [Name], we sincerely apologise for the delay on your complaint [Ticket]. This has been escalated to our senior management and will be resolved within 2 business days. — Ticano [Branch]', variables: ['Name','Ticket','Branch'], active: true, lastUpdated: '2026-06-01T10:00:00' },
+    { id: 302, name: 'Branch Update to Staff', key: 'branch_update', body: 'Team update: [Message]. Please acknowledge and ensure compliance by [Deadline]. Raise any concerns directly with me. — [Manager], Service Manager [Branch]', variables: ['Message','Deadline','Manager','Branch'], active: true, lastUpdated: '2026-05-20T10:00:00' },
+    { id: 303, name: 'SLA Warning to PM', key: 'sla_warning', body: 'Urgent: Complaint [Ticket] for client [Name] is approaching its SLA deadline. Please update the status and provide a resolution plan by [Deadline]. — [Manager]', variables: ['Ticket','Name','Deadline','Manager'], active: true, lastUpdated: '2026-04-15T10:00:00' },
+    { id: 304, name: 'Staff Performance Alert', key: 'staff_alert', body: 'Hi [PM], I wanted to discuss your current complaint load and performance metrics. Please schedule a brief call with me this week. — [Manager], Service Manager', variables: ['PM','Manager'], active: true, lastUpdated: '2026-03-08T10:00:00' },
+    { id: 305, name: 'SLA Breach Notice', key: 'sla_breach', body: 'ALERT: Complaint [Ticket] has breached its 14-day SLA. Client: [Name]. This has been flagged to the Director. Immediate action required. — [Manager]', variables: ['Ticket','Name','Manager'], active: true, lastUpdated: '2026-02-10T10:00:00' },
+  ],
+  // Director — VIP client + internal executive
+  director: [
+    { id: 401, name: 'VIP Client Communication', key: 'vip_client', body: 'Dear [Name], as Director of Ticano Group, I personally want to assure you that your concern is being handled at the highest level. I will ensure [Commitment] by [Date]. — [Director]', variables: ['Name','Commitment','Date','Director'], active: true, lastUpdated: '2026-06-01T10:00:00' },
+    { id: 402, name: 'Executive Escalation Response', key: 'exec_escalation', body: 'Dear [Name], I have personally reviewed your complaint [Ticket] and have assigned it to our most senior team. You will receive a resolution by [Date]. — [Director], Ticano Group', variables: ['Name','Ticket','Date','Director'], active: true, lastUpdated: '2026-05-15T10:00:00' },
+    { id: 403, name: 'Branch Manager Directive', key: 'branch_directive', body: 'Hi [Manager], following my review of [Branch] performance, I need the following addressed by [Deadline]: [Action]. Please confirm receipt. — [Director]', variables: ['Manager','Branch','Deadline','Action','Director'], active: true, lastUpdated: '2026-04-20T10:00:00' },
+    { id: 404, name: 'Policy Update Notice', key: 'policy_update', body: 'Team, effective [Date], the following policy update applies: [Policy]. Please ensure all staff are briefed. Questions to be directed to your Service Manager. — [Director]', variables: ['Date','Policy','Director'], active: true, lastUpdated: '2026-03-12T10:00:00' },
+    { id: 405, name: 'Quarterly Review Invite', key: 'quarterly_review', body: 'Hi [Name], you are invited to the Q[Quarter] performance review on [Date] at [Time]. Location: [Venue]. Please confirm attendance. — [Director], Ticano Group', variables: ['Name','Quarter','Date','Time','Venue','Director'], active: true, lastUpdated: '2026-02-05T10:00:00' },
+  ],
+};
+
+// Merge all for backward compat
 let WA_TEMPLATES = [
-  { id: 1, name: 'Birthday Greeting', key: 'birthday', body: 'Happy Birthday [Name]! 🎂 Ticano wishes you a wonderful day filled with joy and success.', variables: ['Name'], active: true, lastUpdated: '2026-05-10T10:00:00' },
-  { id: 2, name: 'Complaint Received', key: 'complaint_received', body: 'Hi [Name], your complaint has been received and assigned ticket number [Ticket]. Our team will be in touch within 24 hours.', variables: ['Name','Ticket'], active: true, lastUpdated: '2026-04-22T10:00:00' },
-  { id: 3, name: 'Complaint Resolved', key: 'complaint_resolved', body: 'Hi [Name], we are pleased to inform you that your complaint [Ticket] has been resolved. Please rate your experience: [Link]', variables: ['Name','Ticket','Link'], active: true, lastUpdated: '2026-04-22T10:00:00' },
-  { id: 4, name: 'Appointment Reminder', key: 'appointment_reminder', body: 'Hi [Name], this is a reminder of your appointment with [PM] tomorrow at [Time]. Branch: [Branch]. Reply CONFIRM to confirm.', variables: ['Name','PM','Time','Branch'], active: true, lastUpdated: '2026-06-01T10:00:00' },
-  { id: 5, name: 'Follow-up Check-in', key: 'followup', body: 'Hi [Name], just checking in. Is there anything else we can help you with regarding your [Product] application? Reply anytime.', variables: ['Name','Product'], active: true, lastUpdated: '2026-05-18T10:00:00' },
-  { id: 6, name: 'Review Request', key: 'review_request', body: 'Hi [Name], thank you for banking with Ticano! Please take 2 minutes to share your experience: [Link]. Your feedback helps us improve.', variables: ['Name','Link'], active: true, lastUpdated: '2026-03-15T10:00:00' },
+  ...WA_TEMPLATES_BY_ROLE.admin,
+  ...WA_TEMPLATES_BY_ROLE.portfolio_manager,
+  ...WA_TEMPLATES_BY_ROLE.service_manager,
+  ...WA_TEMPLATES_BY_ROLE.director,
 ];
 let NEXT_TPL_ID = 100;
 
-export const getWaTemplates = () => ok([...WA_TEMPLATES]);
+export const getWaTemplates = (role) => {
+  if (role && WA_TEMPLATES_BY_ROLE[role]) return ok([...WA_TEMPLATES_BY_ROLE[role]]);
+  return ok([...WA_TEMPLATES]);
+};
 export const createWaTemplate = (data) => {
   const tpl = { id: NEXT_TPL_ID++, lastUpdated: new Date().toISOString(), active: true, ...data };
   WA_TEMPLATES = [tpl, ...WA_TEMPLATES];
@@ -1427,3 +1468,26 @@ export const generateReport = (type, params) => ok({
     topIssue: 'Payment issues',
   }
 });
+
+// ---- Birthday Preferences ----
+let BIRTHDAY_PREFS = {
+  1: { enabled: false, channel: 'whatsapp', birthdayDate: '1995-03-15' },
+};
+
+export const getBirthdayPrefs = (userId) => ok(BIRTHDAY_PREFS[userId] || { enabled: false, channel: 'whatsapp', birthdayDate: '' });
+
+export const saveBirthdayPrefs = (userId, prefs) => {
+  BIRTHDAY_PREFS[userId] = { ...BIRTHDAY_PREFS[userId], ...prefs };
+  return ok({ message: 'Birthday preferences saved', prefs: BIRTHDAY_PREFS[userId] });
+};
+
+export const simulateBirthdaySend = (userId) => {
+  const prefs = BIRTHDAY_PREFS[userId];
+  if (!prefs?.enabled) return ok({ sent: false, reason: 'Birthday messages not enabled' });
+  return ok({
+    sent: true,
+    channel: prefs.channel,
+    message: `Happy Birthday! 🎂 From your Portfolio Manager and the whole Ticano team. No one should be small forever — here's to another great year! ticanogroup.co.bw`,
+    sentAt: new Date().toISOString(),
+  });
+};

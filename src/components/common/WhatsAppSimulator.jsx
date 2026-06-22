@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Send, CheckCheck, Phone, MoreVertical, Search, Smile, Paperclip, MessageCircle } from 'lucide-react';
 import { getWaTemplates } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 
 const formatTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
@@ -17,9 +18,10 @@ export default function WhatsAppSimulator({ clientName = 'Stacey Nthoi', clientP
   const [sending, setSending]   = useState(false);
   const [sent, setSent]         = useState([]);
 
+  const { user } = useAuth();
   useEffect(() => {
-    getWaTemplates().then(({ data }) => setTemplates(data));
-  }, []);
+    getWaTemplates(user?.role).then(({ data }) => setTemplates(data));
+  }, [user?.role]);
 
   const buildPreview = (tpl, vars) => {
     if (!tpl) return '';

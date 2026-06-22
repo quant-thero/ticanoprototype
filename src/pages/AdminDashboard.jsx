@@ -5,12 +5,12 @@ import { Badge, SearchFilters, ExportButton, LoadingSpinner, Modal } from '../co
 import KnowledgeBase from '../components/common/KnowledgeBase';
 import { getUsers, createUser, deleteUser, triggerBackup, getAuditTrail, getBranches, updateBranch, getWaTemplates, createWaTemplate, updateWaTemplate, deleteWaTemplate } from '../services/api';
 import AnnouncementBanner from '../components/common/AnnouncementBanner';
-import TicanoConnect from '../components/common/TicanoConnect';
+import MaintenancePanel from '../components/common/MaintenancePanel';
 import { ROLES, BRANCHES, ROLE_LABELS } from '../utils/constants';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 
-const TABS = ['User Management', 'Branch Management', 'Knowledge Base', 'WhatsApp Templates', 'System Config', 'Database', 'Audit Logs', 'System Health'];
+const TABS = ['User Management', 'Branch Management', 'Knowledge Base', 'WhatsApp Templates', 'Maintenance', 'System Config', 'Database', 'Audit Logs', 'System Health'];
 const STAFF_ROLES = ['portfolio_manager', 'service_manager', 'director', 'marketing', 'admin'];
 
 export default function AdminDashboard() {
@@ -180,6 +180,14 @@ export default function AdminDashboard() {
         {/* Knowledge Base (§8) — Admin has CRUD */}
         {activeTab === 'Knowledge Base' && (
           <KnowledgeBase editable={true} currentUser={user} />
+        )}
+
+        {activeTab === 'Maintenance' && (
+          <div className="bg-white dark:bg-ticano-dark-card rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
+            <h3 className="font-bold text-ticano-charcoal dark:text-white text-lg mb-1">Maintenance Mode</h3>
+            <p className="text-sm text-gray-500 mb-5">Control system-wide maintenance. All users will be notified.</p>
+            <MaintenancePanel />
+          </div>
         )}
 
         {/* System Config */}

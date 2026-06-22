@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FileText, Download, RefreshCw, CheckCircle, BarChart2, Clock, AlertTriangle } from 'lucide-react';
 import { BRANCHES } from '../../utils/constants';
+import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 
 const REPORT_TYPES = [
@@ -34,9 +35,12 @@ const MOCK_REPORT_DATA = {
 };
 
 export default function PDFReportGenerator({ availableTypes }) {
+  const { user } = useAuth();
+  const isServiceManager = user?.role === 'service_manager';
   const types = availableTypes ? REPORT_TYPES.filter(r => availableTypes.includes(r.key)) : REPORT_TYPES;
   const [selected, setSelected]   = useState(null);
-  const [params, setParams]       = useState({ period:'30', branch:'All' });
+  const defaultBranch = isServiceManager ? user?.branch : 'All';
+  const [params, setParams] = useState({ period:'30', branch: defaultBranch });
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated]   = useState(null);
 
@@ -195,10 +199,16 @@ export default function PDFReportGenerator({ availableTypes }) {
             </div>
             <div>
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">Branch</label>
-              <select className={sel} value={params.branch} onChange={e=>setParams({...params,branch:e.target.value})}>
-                <option value="All">All Branches</option>
-                {BRANCHES.map(b=><option key={b} value={b}>{b}</option>)}
-              </select>
+              {isServiceManager ? (
+                <div className="border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+                  {user?.branch} <span className="text-xs text-gray-400">(your branch only)</span>
+                </div>
+              ) : (
+                <select className={sel} value={params.branch} onChange={e=>setParams({...params,branch:e.target.value})}>
+                  <option value="All">All Branches</option>
+                  {BRANCHES.map(b=><option key={b} value={b}>{b}</option>)}
+                </select>
+              )}
             </div>
           </div>
           <button onClick={generatePDF} disabled={generating}

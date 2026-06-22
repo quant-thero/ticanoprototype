@@ -14,7 +14,6 @@ import KnowledgeBase from '../components/common/KnowledgeBase';
 import { getComplaints, createLead, searchCustomers, getAppointments } from '../services/api';
 import AppointmentModule from '../components/common/AppointmentModule';
 import AnnouncementBanner from '../components/common/AnnouncementBanner';
-import TicanoConnect from '../components/common/TicanoConnect';
 import WhatsAppSimulator from '../components/common/WhatsAppSimulator';
 import EmailNotifications from '../components/common/EmailNotifications';
 import { OPEN_COMPLAINT_STATUSES, complaintStatusLabel } from '../utils/constants';
@@ -82,7 +81,6 @@ export default function PmDashboard() {
           onChange={setTab}
         />
 
-        <TicanoConnect />
         <ReviewLinkSender open={showReviewSender} onClose={() => setShowReviewSender(false)} />
 
         {tab === 'whatsapp' && (

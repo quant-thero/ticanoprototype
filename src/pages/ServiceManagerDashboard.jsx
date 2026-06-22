@@ -18,8 +18,8 @@ import ReportsModule from '../components/common/ReportsModule';
 import PDFReportGenerator from '../components/common/PDFReportGenerator';
 import AdvancedCharts from '../components/common/AdvancedCharts';
 import WhatsAppSimulator from '../components/common/WhatsAppSimulator';
+import BranchLeaderboard from '../components/common/BranchLeaderboard';
 import EmailNotifications from '../components/common/EmailNotifications';
-import TicanoConnect from '../components/common/TicanoConnect';
 import AnnouncementBanner from '../components/common/AnnouncementBanner';
 import { formatPercent, formatDate, formatDateTime } from '../utils/format';
 import { CLIENT_TYPE_LABEL, JOURNEY_STAGE_LABEL, complaintStatusLabel, OPEN_COMPLAINT_STATUSES } from '../utils/constants';
@@ -114,6 +114,7 @@ export default function ServiceManagerDashboard() {
         {/* ---------- OVERVIEW ---------- */}
         {activeTab === 'Overview' && (
           <>
+          <div className="mb-5"><BranchLeaderboard /></div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard title="Today's Interactions" value="18" icon={Activity} color="navy" />
               <StatCard title="Avg Rating This Week" value="4.3" subtitle="out of 5.0" icon={TrendingUp} color="teal" />
@@ -432,7 +433,6 @@ export default function ServiceManagerDashboard() {
           </div>
         )}
 
-      <TicanoConnect />
       </div>
     </div>
   );

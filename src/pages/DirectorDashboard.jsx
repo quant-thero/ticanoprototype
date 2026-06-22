@@ -7,8 +7,8 @@ import BranchDetailView from '../components/common/BranchDetailView';
 import ReportsModule from '../components/common/ReportsModule';
 import PDFReportGenerator from '../components/common/PDFReportGenerator';
 import PredictiveAnalytics from '../components/common/PredictiveAnalytics';
+import BranchLeaderboard from '../components/common/BranchLeaderboard';
 import AdvancedCharts from '../components/common/AdvancedCharts';
-import TicanoConnect from '../components/common/TicanoConnect';
 import EmailNotifications from '../components/common/EmailNotifications';
 import AnnouncementBanner from '../components/common/AnnouncementBanner';
 import {
@@ -24,7 +24,7 @@ import { JOURNEY_STAGE_LABEL, complaintStatusLabel, BRANCH_COORDS } from '../uti
 import { formatDateTime } from '../utils/format';
 import toast from 'react-hot-toast';
 
-const TABS = ['Action Centre', 'Executive Summary', 'Branch Health', 'Smart Insights', 'Heat Map', 'Branch Comparison', 'Active Client Mix', 'Complaint Analytics', 'Escalations', 'Lead Conversion', 'Referral Network', 'Announcements', 'Reports', 'Predictive Analytics', 'Advanced Charts', 'Email Notifications', 'Bulk Message'];
+const TABS = ['Action Centre', 'Executive Summary', 'Branch Health', 'Smart Insights', 'Heat Map', 'Branch Comparison', 'Branch Leaderboard', 'Active Client Mix', 'Complaint Analytics', 'Escalations', 'Lead Conversion', 'Referral Network', 'Announcements', 'Reports', 'Predictive Analytics', 'Advanced Charts', 'Email Notifications', 'Bulk Message'];
 const COLORS = ['#CE313C', '#808686', '#a6abab', '#373435', '#a8252f'];
 const RED = '#CE313C';
 const GRAY = '#808686';
@@ -327,6 +327,12 @@ export default function DirectorDashboard() {
                 </table>
               </div>
             </Card>
+          </div>
+        )}
+
+        {activeTab === 'Branch Leaderboard' && (
+          <div className="bg-white dark:bg-ticano-dark-card rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
+            <BranchLeaderboard />
           </div>
         )}
 
@@ -863,7 +869,6 @@ function HeatMapTab() {
           </tbody>
         </table>
       </Card>
-    <TicanoConnect />
     </div>
   );
 }

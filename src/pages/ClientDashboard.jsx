@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Star, MessageSquare, ToggleLeft, ToggleRight, UserCheck, ShieldAlert, Hash, History, Lightbulb, CheckCircle2, Calendar, MapPin } from 'lucide-react';
+import { User, Star, MessageSquare, ToggleLeft, ToggleRight, UserCheck, ShieldAlert, Hash, History, Lightbulb, CheckCircle2, Calendar, MapPin, Cake } from 'lucide-react';
 import Navbar from '../components/common/Navbar';
 import { StarRating, LoadingSpinner, Card, EmptyState } from '../components/common/UI';
 import ComplaintTracker from '../components/common/ComplaintTracker';
@@ -10,8 +10,8 @@ import SatisfactionSurveyForm from '../components/common/SatisfactionSurveyForm'
 import { getProfile, getMyFeedback, getMyComplaints, submitRating, submitComplaint, optOut } from '../services/api';
 import AppointmentModule from '../components/common/AppointmentModule';
 import OnboardingChecklist from '../components/common/OnboardingChecklist';
+import BirthdayPreferences from '../components/common/BirthdayPreferences';
 import AnnouncementBanner from '../components/common/AnnouncementBanner';
-import TicanoConnect from '../components/common/TicanoConnect';
 import BranchMap from '../components/common/BranchMap';
 import DocumentUpload from '../components/common/DocumentUpload';
 import SLACountdown from '../components/common/SLACountdown';
@@ -33,6 +33,7 @@ const tabsForLang = (t) => [
   { id: 'feedback',   label: t('Feedback History'),   icon: Star },
   { id: 'appointments', label: t('Appointments'),        icon: Calendar },
   { id: 'branches',     label: t('Find a Branch'),      icon: MapPin },
+  { id: 'birthday',   label: t('Birthday Messages'),  icon: Cake },
   { id: 'profile',    label: t('My Profile'),         icon: User },
 ];
 
@@ -333,6 +334,14 @@ export default function ClientDashboard() {
         )}
 
 
+        {activeTab === 'birthday' && (
+          <div className="bg-white dark:bg-ticano-dark-card rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
+            <h3 className="font-bold text-ticano-charcoal dark:text-white text-lg mb-1">Birthday Messages</h3>
+            <p className="text-sm text-gray-500 mb-5">Opt in to receive a birthday greeting from your Portfolio Manager and the Ticano team.</p>
+            <BirthdayPreferences />
+          </div>
+        )}
+
         {activeTab === 'branches' && (
           <div className="bg-white dark:bg-ticano-dark-card rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
             <h3 className="font-bold text-ticano-charcoal dark:text-white text-lg mb-1">Find a Branch</h3>
@@ -341,7 +350,6 @@ export default function ClientDashboard() {
           </div>
         )}
 
-        <TicanoConnect complaints={myComplaints || []} />
 
       </div>
     </div>

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FileText, Download, BarChart2, Clock, CheckCircle, AlertTriangle, TrendingUp, RefreshCw } from 'lucide-react';
 import { generateReport } from '../../services/api';
 import { BRANCHES } from '../../utils/constants';
+import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 
 const REPORT_TYPES = [
@@ -13,13 +14,16 @@ const REPORT_TYPES = [
   { key: 'monthly_executive',    label: 'Monthly Executive',     icon: FileText,      desc: 'Full executive summary — complaints, leads, referrals, CSAT' },
 ];
 
-export default function ReportsModule({ availableTypes }) {
+export default function ReportsModule({ availableTypes, lockedBranch }) {
   const types = availableTypes
     ? REPORT_TYPES.filter(r => availableTypes.includes(r.key))
     : REPORT_TYPES;
 
   const [selected, setSelected]   = useState(null);
-  const [params, setParams]       = useState({ period: '30', branch: 'All' });
+  const { user } = useAuth();
+  const isServiceManager = user?.role === 'service_manager';
+  const defaultBranch = lockedBranch || (isServiceManager ? user?.branch : 'All');
+  const [params, setParams] = useState({ period: '30', branch: defaultBranch });
   const [loading, setLoading]     = useState(false);
   const [result, setResult]       = useState(null);
 

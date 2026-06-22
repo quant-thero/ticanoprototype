@@ -69,7 +69,9 @@ export default function MarketingDashboard() {
             { id: 'referrals',    label: 'Referral Analytics' },
             { id: 'other',        label: '"Other" Analysis' },
             { id: 'demographics', label: 'Demographics' },
-            { id: 'satisfaction', label: 'Satisfaction' },
+            { id: 'satisfaction',    label: 'Satisfaction' },
+            { id: 'Advanced Charts', label: 'Advanced Charts' },
+            { id: 'Reports',         label: 'Reports' },
           ]}
           active={tab}
           onChange={setTab}
@@ -311,7 +313,7 @@ export default function MarketingDashboard() {
         )}
       </div>
 
-        {activeTab === 'Advanced Charts' && (
+        {tab === 'Advanced Charts' && (
           <div className="bg-white dark:bg-ticano-dark-card rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
             <h3 className="font-bold text-ticano-charcoal dark:text-white text-lg mb-1">Advanced Charts</h3>
             <p className="text-sm text-gray-500 mb-5">Interactive analytics for marketing insights</p>
@@ -319,7 +321,7 @@ export default function MarketingDashboard() {
           </div>
         )}
 
-        {activeTab === 'Reports' && (
+        {tab === 'Reports' && (
           <div className="bg-white dark:bg-ticano-dark-card rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
             <h3 className="font-bold text-ticano-charcoal dark:text-white text-lg mb-1">Marketing Reports</h3>
             <p className="text-sm text-gray-500 mb-5">Generate lead, referral, and acquisition reports</p>
@@ -327,7 +329,6 @@ export default function MarketingDashboard() {
           </div>
         )}
 
-    <TicanoConnect />
     </div>
   );
 }

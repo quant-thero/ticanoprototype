@@ -19,6 +19,15 @@ import DirectorDashboard from './pages/DirectorDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import MarketingDashboard from './pages/MarketingDashboard';
 import ProfilePage from './pages/ProfilePage';
+import TicanoConnect from './components/common/TicanoConnect';
+import MaintenanceMode from './components/common/MaintenanceMode';
+
+// Global overlay — chatbot + maintenance check for all logged-in users
+const GlobalOverlay = () => {
+  const { token } = useAuth();
+  if (!token) return null;
+  return <TicanoConnect />;
+};
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, token } = useAuth();
@@ -90,6 +99,8 @@ function App() {
                 </div>
               } />
             </Routes>
+            <GlobalOverlay />
+            <MaintenanceMode />
           </Router>
         </NotificationProvider>
       </AuthProvider>
