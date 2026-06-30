@@ -1,0 +1,189 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-ticano-bg text-gray-800 dark:bg-dark-bg dark:text-gray-200 transition-colors duration-200;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary { @apply bg-ticano-charcoal text-white px-4 py-2 rounded-lg hover:bg-black transition-all duration-200 font-medium; }
+  .btn-teal    { @apply bg-ticano-red text-white px-4 py-2 rounded-lg hover:bg-ticano-red-dark transition-all duration-200 font-medium; }
+  .btn-danger  { @apply bg-ticano-red text-white px-4 py-2 rounded-lg hover:bg-ticano-red-dark transition-all duration-200 font-medium; }
+  .card        { @apply bg-white dark:bg-dark-card rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6; }
+  .input-field { @apply w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-ticano-red focus:border-transparent transition-all duration-200; }
+  .table-header { @apply bg-ticano-charcoal text-white text-left px-4 py-3 text-sm font-semibold; }
+  .table-row   { @apply border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors; }
+  .table-cell  { @apply px-4 py-3 text-sm text-gray-700 dark:text-gray-300; }
+
+  /* Animated tab underline */
+  .tab-active { @apply relative; }
+  .tab-active::after {
+    content: '';
+    @apply absolute bottom-0 left-0 right-0 h-0.5 bg-ticano-red rounded-full;
+    animation: tab-slide-in 0.2s ease-out both;
+  }
+
+  /* Glass card effect */
+  .glass-card {
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.4);
+  }
+  .dark .glass-card {
+    background: rgba(38,38,39,0.85);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  /* Animated stat counter */
+  .stat-value {
+    animation: counter 0.6s ease-out both;
+  }
+
+  /* Hover lift cards */
+  .hover-lift {
+    @apply transition-all duration-300;
+  }
+  .hover-lift:hover {
+    @apply -translate-y-1 shadow-lg;
+  }
+
+  /* Status dot pulse */
+  .status-dot-live {
+    @apply relative inline-block w-2 h-2 bg-green-500 rounded-full;
+  }
+  .status-dot-live::after {
+    content: '';
+    @apply absolute inset-0 bg-green-500 rounded-full;
+    animation: ping 1.5s ease-in-out infinite;
+  }
+}
+
+/* Login page - new design uses CSS vars instead of bg image */
+.login-bg {
+  background: linear-gradient(135deg, #1a0a0b 0%, #2d0f12 30%, #373435 70%, #1a1a1b 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Floating orbs on login */
+.login-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  pointer-events: none;
+}
+.login-orb-1 {
+  width: 400px; height: 400px;
+  background: radial-gradient(circle, rgba(206,49,60,0.35) 0%, transparent 70%);
+  top: -100px; left: -100px;
+  animation: orb-move 10s ease-in-out infinite;
+}
+.login-orb-2 {
+  width: 300px; height: 300px;
+  background: radial-gradient(circle, rgba(206,49,60,0.2) 0%, transparent 70%);
+  bottom: -50px; right: -50px;
+  animation: orb-move 13s ease-in-out infinite reverse;
+}
+.login-orb-3 {
+  width: 200px; height: 200px;
+  background: radial-gradient(circle, rgba(168,37,47,0.25) 0%, transparent 70%);
+  top: 50%; left: 60%;
+  animation: orb-move 7s ease-in-out infinite;
+}
+
+/* Animated grid pattern on login */
+.login-grid {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(rgba(206,49,60,0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(206,49,60,0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 20%, transparent 100%);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { @apply bg-gray-100 dark:bg-gray-800; }
+::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
+::-webkit-scrollbar-thumb:hover { @apply bg-gray-400 dark:bg-gray-500; }
+
+/* Word cloud */
+.word-cloud-word {
+  display: inline-block;
+  margin: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: default;
+  background: rgba(0, 0, 0, 0.04);
+  transition: transform 0.2s;
+}
+.dark .word-cloud-word { background: rgba(255, 255, 255, 0.06); }
+.word-cloud-word:hover { transform: scale(1.1); }
+
+/* Logo animation */
+.ticano-mark-spin {
+  animation: spin-settle 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: 50% 50%;
+}
+
+/* Shimmer skeleton */
+.skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+.dark .skeleton {
+  background: linear-gradient(90deg, #2a2a2b 25%, #333334 50%, #2a2a2b 75%);
+  background-size: 200% 100%;
+}
+
+/* Notification badge pulse */
+@keyframes notif-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+}
+.notif-badge-new { animation: notif-pulse 0.4s ease-out; }
+
+/* Page transition */
+.page-enter { animation: fade-up 0.35s ease-out both; }
+
+/* Tab slide in */
+@keyframes tab-slide-in {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+/* Progress bar animation */
+@keyframes progress-fill {
+  from { width: 0%; }
+}
+.progress-animated { animation: progress-fill 0.8s ease-out both; }
+
+/* Accessible reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .ticano-mark-spin { animation: none; }
+  * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
+
+/* High contrast */
+.high-contrast body { @apply bg-white text-black; }
+.high-contrast.dark body { @apply bg-black text-white; }
+.high-contrast .text-gray-400,
+.high-contrast .text-gray-500,
+.high-contrast .text-gray-600 { color: #1f2937 !important; }
+.high-contrast.dark .text-gray-400,
+.high-contrast.dark .text-gray-500,
+.high-contrast.dark .text-gray-600 { color: #f3f4f6 !important; }
+.high-contrast button, .high-contrast input, .high-contrast select, .high-contrast textarea { border-width: 2px !important; }
+.high-contrast :focus, .high-contrast :focus-visible { outline: 3px solid #CE313C !important; outline-offset: 2px !important; }
+
+/* Large text */
+.large-text { font-size: 115%; }
+.large-text .text-xs { font-size: 0.875rem; }
+.large-text .text-sm { font-size: 1rem; }
