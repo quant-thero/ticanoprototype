@@ -66,7 +66,6 @@ function App() {
                   border: '1px solid #f1f1f4',
                 },
                 success: {
-                  icon: '🎉',
                   style: {
                     background: '#f3fbf5',
                     color: '#166534',
@@ -74,7 +73,6 @@ function App() {
                   },
                 },
                 error: {
-                  icon: '🙈',
                   style: {
                     background: '#fff5f5',
                     color: '#b42318',
@@ -82,7 +80,6 @@ function App() {
                   },
                 },
                 loading: {
-                  icon: '⏳',
                   style: {
                     background: '#fbf8ff',
                     color: '#5b21b6',

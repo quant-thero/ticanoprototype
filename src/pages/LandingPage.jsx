@@ -399,6 +399,7 @@ export default function LandingPage() {
   const [showWA, setShowWA] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [selectedCareer, setSelectedCareer] = useState(null);
+  const [selectedBlog, setSelectedBlog] = useState(null);
   const [mounted, setMounted] = useState(false);
   const [site, setSite] = useState(null);
   const [legalDoc, setLegalDoc] = useState(null);
@@ -521,6 +522,7 @@ export default function LandingPage() {
         {promoBannerOn && (
           <div className={PROMO_THEME[promo.theme] || PROMO_THEME.red}>
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-center gap-3 text-center text-sm relative">
+              {promo.image && <img src={promo.image} alt="" className="w-6 h-6 rounded object-cover shrink-0 hidden sm:block" />}
               <span className="font-semibold">{promo.title}</span>
               <span className="hidden sm:inline opacity-90">{promo.message}</span>
               {promo.ctaLabel && (
@@ -597,11 +599,14 @@ export default function LandingPage() {
         <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
             <div className={`transition-all duration-700 ${mounted?'opacity-100 translate-y-0':'opacity-0 translate-y-8'}`}>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 border border-white/15 text-white/80 text-xs font-semibold tracking-wide backdrop-blur-sm mb-5">
+                {hpVal('heroBadge', "Botswana's #1 Trade Finance Platform")}
+              </span>
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white leading-[1.05] mb-4">
                 {hpVal('heroTitle', 'As Your Business Grows, We Deliver The Funds.')}
               </h1>
               {/* Slogan */}
-              <p className="text-base mb-5" style={{color:'#CE313C'}}>
+              <p className="text-5xl mb-5" style={{color:'#CE313C'}}>
                 Re Spache sa <span style={{fontFamily:'Pacifico, cursive'}}>Bangwebi!</span>
               </p>
               <p className="text-white/60 text-lg leading-relaxed mb-4 max-w-lg">
@@ -1005,8 +1010,8 @@ export default function LandingPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {blogs.map((post, i) => (
-                <div key={post.id}
-                  className={`group rounded-2xl border shadow-sm overflow-hidden transition-all duration-300 hover:-translate-y-2 hover:shadow-xl animate-fade-up
+                <div key={post.id} onClick={() => setSelectedBlog(post)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setSelectedBlog(post)}
+                  className={`group rounded-2xl border shadow-sm overflow-hidden transition-all duration-300 hover:-translate-y-2 hover:shadow-xl animate-fade-up cursor-pointer
                     ${dm ? 'bg-gray-800 border-gray-700 hover:border-ticano-red/50' : 'bg-white border-gray-100 hover:border-ticano-red/30'}`}
                   style={{animationDelay:`${i*0.08}s`}}>
                   <div className="h-36 bg-gradient-to-br from-ticano-charcoal to-gray-800 flex items-center justify-center relative overflow-hidden">
@@ -1022,6 +1027,7 @@ export default function LandingPage() {
                       <p className="text-xs text-gray-400">{post.author}</p>
                       <p className="text-xs text-gray-400 flex items-center gap-1"><Calendar size={10}/>{new Date(post.publishedAt).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}</p>
                     </div>
+                    <p className="text-xs font-semibold text-ticano-red mt-3 flex items-center gap-1 group-hover:gap-2 transition-all">Read article <ArrowRight size={12}/></p>
                   </div>
                 </div>
               ))}
@@ -1301,17 +1307,40 @@ export default function LandingPage() {
         </div>
       )}
 
+      {selectedBlog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setSelectedBlog(null)} />
+          <div className={`relative rounded-2xl shadow-2xl w-full max-w-2xl p-6 sm:p-8 animate-scale-in max-h-[90vh] overflow-y-auto ${dm ? 'bg-gray-800' : 'bg-white'}`}>
+            <button onClick={() => setSelectedBlog(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={18}/></button>
+            <div className="flex items-center gap-2 flex-wrap mb-3">
+              {selectedBlog.pinned && <span className="text-xs bg-ticano-red text-white px-2 py-0.5 rounded-full font-semibold">Pinned</span>}
+              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${CAT_BADGE[selectedBlog.category]||'bg-gray-100 text-gray-600'}`}>{selectedBlog.category}</span>
+            </div>
+            <h3 className={`font-black text-2xl leading-tight mb-3 ${dm ? 'text-white' : 'text-ticano-charcoal'}`}>{selectedBlog.title}</h3>
+            <div className="flex items-center gap-3 text-xs text-gray-400 mb-6 flex-wrap">
+              <span>{selectedBlog.author}</span>
+              <span className="flex items-center gap-1"><Calendar size={10}/>{new Date(selectedBlog.publishedAt).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}</span>
+            </div>
+            <p className={`text-sm leading-relaxed whitespace-pre-line ${dm ? 'text-gray-300' : 'text-gray-600'}`}>{selectedBlog.content || selectedBlog.excerpt}</p>
+          </div>
+        </div>
+      )}
+
       {/* Promo popup */}
       {promo?.enabled && promo?.mode === 'popup' && showPromoPopup && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowPromoPopup(false)} />
           <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
-            <div className="bg-ticano-red h-2" />
-            <button onClick={() => setShowPromoPopup(false)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600"><X size={18} /></button>
+            {promo.image ? (
+              <img src={promo.image} alt="Promotion" className="w-full max-h-72 object-cover" />
+            ) : (
+              <div className="bg-ticano-red h-2" />
+            )}
+            <button onClick={() => setShowPromoPopup(false)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 bg-white/80 rounded-full p-1"><X size={18} /></button>
             <div className="p-6 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-ticano-red/10 text-ticano-red flex items-center justify-center mx-auto mb-3"><Megaphone size={22} /></div>
-              <h3 className="text-xl font-black text-ticano-charcoal mb-2">{promo.title}</h3>
-              <p className="text-gray-600 text-sm leading-relaxed mb-5">{promo.message}</p>
+              {!promo.image && <div className="w-12 h-12 rounded-2xl bg-ticano-red/10 text-ticano-red flex items-center justify-center mx-auto mb-3"><Megaphone size={22} /></div>}
+              {promo.title && <h3 className="text-xl font-black text-ticano-charcoal mb-2">{promo.title}</h3>}
+              {promo.message && <p className="text-gray-600 text-sm leading-relaxed mb-5">{promo.message}</p>}
               {promo.ctaLabel && (
                 promo.ctaLink?.startsWith('/')
                   ? <Link to={promo.ctaLink} onClick={() => setShowPromoPopup(false)} className="inline-flex items-center gap-2 px-6 py-3 bg-ticano-red text-white rounded-xl font-bold hover:bg-ticano-red-dark transition-all">{promo.ctaLabel} <ArrowRight size={16} /></Link>

@@ -7,7 +7,7 @@ const TEMPLATES = [
   { key: 'complaint_assigned', subject: 'Your Complaint Has Been Assigned — [Ticket]', body: `Dear [Name],\n\nThank you for contacting Ticano Group. Your complaint [Ticket] has been received and assigned to your Portfolio Manager, [PM], who will be in touch within 24 hours.\n\nYou can track your complaint status at any time by logging into the Ticano Client Portal.\n\nWe are committed to resolving your concern within 14 business days.\n\nWarm regards,\nTicano Group Service Team\nwww.ticanogroup.co.bw` },
   { key: 'complaint_resolved', subject: 'Your Complaint Has Been Resolved — [Ticket]', body: `Dear [Name],\n\nWe are pleased to inform you that your complaint [Ticket] has been successfully resolved.\n\nResolution summary: [Resolution]\n\nWe value your feedback. Please take a moment to rate your experience using the link below:\n[ReviewLink]\n\nThank you for your patience and for banking with Ticano Group.\n\nWarm regards,\nTicano Group Service Team\nwww.ticanogroup.co.bw` },
   { key: 'escalation_notice', subject: 'Complaint Escalation Notice — [Ticket]', body: `Dear [Name],\n\nWe want to inform you that your complaint [Ticket] has been escalated to our senior management team for priority resolution.\n\nWe sincerely apologise for any inconvenience caused and assure you this is now being handled with the highest priority.\n\nA senior team member will contact you within 2 business days.\n\nWarm regards,\nTicano Group Service Team\nwww.ticanogroup.co.bw` },
-  { key: 'sla_breach_internal', subject: '⚠️ SLA Breach Alert — [Ticket] — Action Required', body: `Dear [PM],\n\nThis is an automated alert to notify you that complaint [Ticket] assigned to you has exceeded the 14-day SLA resolution deadline.\n\nClient: [Name]\nTicket: [Ticket]\nDays overdue: [Days]\n\nPlease action this complaint immediately and update the status in the system.\n\nThis alert has been copied to your Service Manager.\n\nTicano Group — Automated Service Alert` },
+  { key: 'sla_breach_internal', subject: 'SLA Breach Alert — [Ticket] — Action Required', body: `Dear [PM],\n\nThis is an automated alert to notify you that complaint [Ticket] assigned to you has exceeded the 14-day SLA resolution deadline.\n\nClient: [Name]\nTicket: [Ticket]\nDays overdue: [Days]\n\nPlease action this complaint immediately and update the status in the system.\n\nThis alert has been copied to your Service Manager.\n\nTicano Group — Automated Service Alert` },
 ];
 
 export default function EmailNotifications({ branch }) {
@@ -60,7 +60,7 @@ export default function EmailNotifications({ branch }) {
     setSending(true);
     await new Promise((r) => setTimeout(r, 900));
     setSent((prev) => [{ id: Date.now(), to: recipient, subject, sentAt: new Date() }, ...prev]);
-    toast.success(`Email sent to ${recipient} ✓`);
+    toast.success(`Email sent to ${recipient}`);
     setSending(false);
   };
 

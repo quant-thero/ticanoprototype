@@ -122,7 +122,7 @@ export default function ComplaintForm({ onSubmit, clientType = 'existing', defau
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         toast.error('Microphone access denied. Please allow microphone permission.');
       } else if (e.error === 'no-speech') {
-        toast('No speech detected — try again.', { icon: '🎙️' });
+        toast('No speech detected — try again.');
       }
     };
     rec.onend = () => setListening(false);
@@ -143,7 +143,7 @@ export default function ComplaintForm({ onSubmit, clientType = 'existing', defau
     try {
       rec.start();
       setListening(true);
-      toast('Listening… speak your complaint', { icon: '🎙️' });
+      toast('Listening… speak your complaint');
     } catch {
       // start() can throw if called too quickly after stop()
       setListening(false);

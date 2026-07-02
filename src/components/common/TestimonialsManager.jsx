@@ -38,7 +38,7 @@ export default function TestimonialsManager() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h3 className="text-lg font-bold text-ticano-charcoal dark:text-white flex items-center gap-2"><Quote size={18} /> Testimonials & Reviews</h3>
-          <p className="text-sm text-gray-500 mt-0.5">Manage the client reviews shown on the public homepage. Hidden testimonials stay saved but are not displayed.</p>
+          <p className="text-sm text-gray-500 mt-0.5">5-star customer satisfaction survey responses are picked up automatically. Remove any you don't want shown, or add a testimonial a client sent by text/WhatsApp.</p>
         </div>
         <button onClick={startCreate} className="flex items-center gap-2 px-4 py-2 bg-ticano-red text-white rounded-xl text-sm font-semibold hover:bg-ticano-red-dark transition-colors"><Plus size={15} /> Add testimonial</button>
       </div>
@@ -81,6 +81,7 @@ export default function TestimonialsManager() {
                   <p className="font-semibold text-gray-800 dark:text-white text-sm">{t.name}</p>
                   {t.company && <span className="text-xs text-gray-400">· {t.company}</span>}
                   <span className="flex">{[1, 2, 3, 4, 5].map((n) => <Star key={n} size={11} className={n <= t.rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200'} />)}</span>
+                  {t.source === 'survey' && <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-semibold">Auto-picked · 5★ survey</span>}
                   {t.enabled
                     ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-semibold">On homepage</span>
                     : <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-200 text-gray-500 font-semibold">Hidden</span>}

@@ -34,6 +34,28 @@ const MOCK_REPORT_DATA = {
   ],
 };
 
+// Loads the Ticano logo (served from /public) and converts it to a base64
+// data URL so it can be embedded directly into generated PDFs via jsPDF's
+// addImage(). Falls back gracefully (header text still renders) if the
+// logo can't be fetched, e.g. offline.
+const loadLogoDataUrl = () => new Promise((resolve) => {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    } catch {
+      resolve(null);
+    }
+  };
+  img.onerror = () => resolve(null);
+  img.src = '/ticano-logo.png';
+});
+
 export default function PDFReportGenerator({ availableTypes, allBranches = false }) {
   const { user } = useAuth();
   const isServiceManager = user?.role === 'service_manager' && !allBranches;
@@ -52,6 +74,7 @@ export default function PDFReportGenerator({ availableTypes, allBranches = false
     try {
       const { default: jsPDF } = await import('jspdf');
       const { default: autoTable } = await import('jspdf-autotable');
+      const logoDataUrl = await loadLogoDataUrl();
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const d = MOCK_REPORT_DATA;
       const RED = [206, 49, 60];
@@ -61,13 +84,17 @@ export default function PDFReportGenerator({ availableTypes, allBranches = false
       // Header bar
       doc.setFillColor(...RED);
       doc.rect(0, 0, W, 28, 'F');
+      const textStartX = logoDataUrl ? 26 : 14;
+      if (logoDataUrl) {
+        try { doc.addImage(logoDataUrl, 'PNG', 14, 6, 9, 9); } catch {}
+      }
       doc.setTextColor(255, 255, 255);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(16);
-      doc.text('TICANO GROUP', 14, 11);
+      doc.text('TICANO GROUP', textStartX, 11);
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
-      doc.text('Purchase Order Financing · Service Intelligence', 14, 18);
+      doc.text('Purchase Order Financing · Service Intelligence', textStartX, 18);
       doc.text('ticanogroup.co.bw', W - 14, 18, { align: 'right' });
 
       // Report title

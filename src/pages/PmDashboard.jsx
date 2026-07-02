@@ -12,6 +12,7 @@ import ComplaintsModule from '../components/common/ComplaintsModule';
 import ReviewLinkSender from '../components/common/ReviewLinkSender';
 import LeadsModule from '../components/common/LeadsModule';
 import KnowledgeBase from '../components/common/KnowledgeBase';
+import ClientPortfolio from '../components/common/ClientPortfolio';
 import { getComplaints, createLead, searchCustomers } from '../services/api';
 import AnnouncementBanner from '../components/common/AnnouncementBanner';
 import WhatsAppSimulator from '../components/common/WhatsAppSimulator';
@@ -34,7 +35,7 @@ export default function PmDashboard() {
   const { user } = useAuth();
   const [tab, setTab] = useState('overview');
   const [searchParams] = useSearchParams();
-  const PM_TAB_IDS = ['overview', 'complaints', 'kb', 'leads', 'ratings', 'whatsapp', 'email'];
+  const PM_TAB_IDS = ['overview', 'complaints', 'kb', 'leads', 'portfolio', 'ratings', 'whatsapp', 'email'];
   useEffect(() => {
     const t = searchParams.get('tab');
     if (t && PM_TAB_IDS.includes(t)) setTab(t);
@@ -78,6 +79,7 @@ export default function PmDashboard() {
             { id: 'complaints', label: 'My Complaints' },
             { id: 'kb',         label: 'Knowledge Base' },
             { id: 'leads',      label: 'Potential Clients' },
+            { id: 'portfolio',  label: 'Client Portfolio' },
             { id: 'ratings',    label: 'Rating Analytics' },
             { id: 'whatsapp', label: 'WhatsApp' },
             { id: 'email', label: 'Email' },
@@ -167,6 +169,9 @@ export default function PmDashboard() {
 
         {/* ---------- LEADS ---------- */}
         {tab === 'leads' && <LeadsModule branch={user?.branch} />}
+
+        {/* ---------- CLIENT PORTFOLIO (PM CRM) ---------- */}
+        {tab === 'portfolio' && <ClientPortfolio mode="pm" />}
 
         {/* ---------- RATING ANALYTICS ---------- */}
         {tab === 'ratings' && (

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Inbox, AlertTriangle, X, ChevronDown, ChevronRight, ArrowLeft, BarChart3 } from 'lucide-react';
 import { exportRows } from '../../utils/exporter';
 
@@ -183,8 +184,11 @@ export function Modal({ isOpen, open, onClose, title, children, footer, size = '
   const sizeMap = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', full: 'max-w-6xl' };
   const visible = isOpen ?? open;
   if (!visible) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+  // Rendered via a portal directly onto <body> so the modal always paints above
+  // the sticky navbar (and anything else with its own stacking context),
+  // regardless of how deeply nested the triggering component is.
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={onClose} />
       <div className={`relative w-full ${sizeMap[size]} bg-white dark:bg-ticano-dark-card rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 max-h-[90vh] overflow-y-auto animate-scale-in`}>
         {title && (
@@ -202,7 +206,8 @@ export function Modal({ isOpen, open, onClose, title, children, footer, size = '
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

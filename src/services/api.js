@@ -101,9 +101,37 @@ const logSiteAudit = (section, previousValue, newValue, user) => {
     previousValue: typeof previousValue === 'string' ? previousValue : JSON.stringify(previousValue),
     newValue: typeof newValue === 'string' ? newValue : JSON.stringify(newValue),
   });
+  logSystemEvent('Content', `Updated ${section}`, user || 'Admin');
 };
 
 export const getSiteAudit = () => ok([...SITE_AUDIT]);
+
+// ---------------------------------------------------------------------
+// System-wide audit log (§ general activity) — records what users are
+// doing across the whole platform, not just complaint handling. Every
+// module below (auth, user management, branches, content, client
+// portfolio, etc.) feeds into this single feed so Admin can see real
+// system activity, filterable by module.
+// ---------------------------------------------------------------------
+let SYSTEM_AUDIT_LOG = [];
+let NEXT_SYSTEM_AUDIT_ID = 1;
+export const SYSTEM_AUDIT_MODULES = ['Security', 'User Management', 'Branches', 'Content', 'Complaints', 'Client Portfolio', 'Marketing'];
+const logSystemEvent = (module, action, user, details = '') => {
+  SYSTEM_AUDIT_LOG.unshift({
+    id: NEXT_SYSTEM_AUDIT_ID++,
+    module,
+    action,
+    user: user || 'system',
+    details,
+    at: new Date().toISOString(),
+  });
+};
+export const getSystemAuditTrail = (filters = {}) => {
+  let rows = [...SYSTEM_AUDIT_LOG];
+  if (filters.module && filters.module !== 'all') rows = rows.filter((r) => r.module === filters.module);
+  if (filters.user) rows = rows.filter((r) => r.user.toLowerCase().includes(String(filters.user).toLowerCase()));
+  return ok(rows);
+};
 
 export const getSiteSettings = () => ok(clone(SITE_SETTINGS));
 
@@ -113,20 +141,39 @@ export const getSiteSettings = () => ok(clone(SITE_SETTINGS));
 //   - The Director can publish a single announcement strip to the homepage.
 //   - Marketing can publish a promotional banner OR pop-up to the homepage.
 // =====================================================================
-let HOMEPAGE_ANNOUNCEMENT = {
+// Small helper so homepage-published content (announcement, promo) survives
+// page reloads and opening the site in a fresh tab — without this, values
+// only lived in this module's in-memory state for the current page load,
+// so a promo published in the Marketing dashboard wouldn't show up if the
+// public homepage was opened separately / reloaded afterwards.
+const persistLocal = (key, value) => {
+  try { if (typeof window !== 'undefined' && window.localStorage) window.localStorage.setItem(key, JSON.stringify(value)); } catch {}
+};
+const restoreLocal = (key, fallback) => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(key);
+      if (raw) return { ...fallback, ...JSON.parse(raw) };
+    }
+  } catch {}
+  return fallback;
+};
+
+let HOMEPAGE_ANNOUNCEMENT = restoreLocal('ticano_homepage_announcement', {
   enabled: true,
   text: 'Ticano now finances imported large-transaction goods up to 180-day cycles — talk to your branch today.',
   link: '',
   updatedBy: 'Director',
   updatedAt: '2026-06-01T09:00:00',
-};
+});
 export const getHomepageAnnouncement = () => ok(clone(HOMEPAGE_ANNOUNCEMENT));
 export const setHomepageAnnouncement = (data, user = 'Director') => {
   HOMEPAGE_ANNOUNCEMENT = { ...HOMEPAGE_ANNOUNCEMENT, ...data, updatedBy: user, updatedAt: new Date().toISOString() };
+  persistLocal('ticano_homepage_announcement', HOMEPAGE_ANNOUNCEMENT);
   return ok({ message: 'Homepage announcement updated', announcement: clone(HOMEPAGE_ANNOUNCEMENT) });
 };
 
-let HOMEPAGE_PROMO = {
+let HOMEPAGE_PROMO = restoreLocal('ticano_homepage_promo', {
   enabled: false,
   mode: 'banner', // 'banner' (top strip) | 'popup' (modal on load)
   title: 'Apply before month-end',
@@ -134,12 +181,15 @@ let HOMEPAGE_PROMO = {
   ctaLabel: 'Apply now',
   ctaLink: '/register',
   theme: 'red', // 'red' | 'charcoal' | 'light'
+  image: null, // optional base64 data URL of an uploaded flyer/photo
   updatedBy: 'Marketing',
   updatedAt: '2026-06-01T09:00:00',
-};
+});
 export const getHomepagePromo = () => ok(clone(HOMEPAGE_PROMO));
 export const setHomepagePromo = (data, user = 'Marketing') => {
   HOMEPAGE_PROMO = { ...HOMEPAGE_PROMO, ...data, updatedBy: user, updatedAt: new Date().toISOString() };
+  persistLocal('ticano_homepage_promo', HOMEPAGE_PROMO);
+  logSystemEvent('Marketing', HOMEPAGE_PROMO.enabled ? 'Published homepage promo' : 'Saved homepage promo', user);
   return ok({ message: 'Homepage promotion updated', promo: clone(HOMEPAGE_PROMO) });
 };
 
@@ -210,10 +260,12 @@ export const login = async (identifier, _password) => {
   const key = String(identifier).trim().toLowerCase();
   const user = DEMO_USERS[key];
   if (!user) {
+    logSystemEvent('Security', 'Failed login attempt', key);
     const err = new Error('Invalid credentials');
     err.response = { status: 401, data: { message: 'Unknown account. Try one of the demo logins below.' } };
     throw err;
   }
+  logSystemEvent('Security', 'Logged in', user.name, user.role);
   return { data: { token: 'mock-jwt-token.' + btoa(key), ...user } };
 };
 
@@ -249,6 +301,7 @@ export const requestPasswordReset = async (email) => {
 // employee must change on next login.
 export const adminResetUserPassword = (id) => {
   const temp = `TCN-Temp-${Math.floor(1000 + Math.random() * 9000)}`;
+  logSystemEvent('User Management', 'Reset employee password', 'Admin', `User #${id}`);
   return ok({ message: 'Temporary password generated', id, tempPassword: temp, mustChangeOnNextLogin: true });
 };
 
@@ -437,6 +490,7 @@ const logAudit = (complaint, action, previousValue, newValue, user) => {
     newValue,
     at: new Date().toISOString(),
   });
+  logSystemEvent('Complaints', `${action} — ${complaint.ticket}`, user || 'system', newValue ? `${previousValue || '—'} → ${newValue}` : '');
 };
 
 // ---- Public read endpoints ----
@@ -967,9 +1021,9 @@ export const getUsers = () => ok([
   { id: 12, name: 'Tebogo Nkosi',      email: 'tnkosi@ticano.bw',   role: 'portfolio_manager', branch: 'Maun',        isActive: false, createdAt: '2025-11-11T08:00:00' },
 ]);
 
-export const createUser = (data) => ok({ message: 'User created', id: 100, ...data });
-export const updateUser = (id, data) => ok({ message: 'User updated', id, ...data });
-export const deleteUser = (id) => ok({ message: 'User deactivated', id });
+export const createUser = (data) => { logSystemEvent('User Management', 'Created employee', 'Admin', data?.name || ''); return ok({ message: 'User created', id: 100, ...data }); };
+export const updateUser = (id, data) => { logSystemEvent('User Management', 'Updated employee', 'Admin', data?.name || `#${id}`); return ok({ message: 'User updated', id, ...data }); };
+export const deleteUser = (id) => { logSystemEvent('User Management', 'Deactivated employee', 'Admin', `#${id}`); return ok({ message: 'User deactivated', id }); };
 
 export const getAuditLogs = () => ok([
   { id: 1, userId: 5, action: 'CREATE_USER',        details: 'Created user osello@ticano.bw',                         createdAt: '2026-06-14T10:11:00' },
@@ -1044,11 +1098,13 @@ export const createBranch = (data = {}) => {
     lng: typeof data.lng === 'number' ? data.lng : (data.lng ? Number(data.lng) : null),
   };
   BRANCH_DIRECTORY = [...BRANCH_DIRECTORY, branch];
+  logSystemEvent('Branches', 'Created branch', 'Admin', branch.name);
   return ok({ message: 'Branch created', branch });
 };
 
 export const updateBranch = (id, data) => {
   BRANCH_DIRECTORY = BRANCH_DIRECTORY.map((b) => (b.id === Number(id) ? { ...b, ...data } : b));
+  logSystemEvent('Branches', 'Updated branch', 'Admin', BRANCH_DIRECTORY.find((b) => b.id === Number(id))?.name || `#${id}`);
   return ok({ message: 'Branch updated', branch: BRANCH_DIRECTORY.find((b) => b.id === Number(id)) });
 };
 
@@ -1616,6 +1672,236 @@ export const getClientDirectory = (filters = {}) => {
 
 // Distinct industries (for marketing broadcast recipient filtering).
 export const getClientIndustries = () => ok([...new Set(CLIENT_MASTER.map((c) => c.industry))].sort());
+
+// =====================================================================
+//  CLIENT PORTFOLIO — Portfolio Manager CRM for PO Financing relationships
+//  Tracks how many times a PM has assisted each client (manually logged
+//  PO financing facilitations), plus independent contact/retention
+//  tracking. Distinct from the complaint/customer master above. Read
+//  access is also exposed to Service Manager and Director for oversight
+//  (see getPortfolioClients({ orgWide: true })).
+//  Client IDs reuse the universal TIC- system (clientIdFor) — the internal
+//  id range here is offset so it never collides with CLIENT_MASTER ids.
+// =====================================================================
+export const CONTACT_METHODS = ['Phone', 'WhatsApp', 'Email', 'Physical visit'];
+export const ASSISTANCE_STATUSES = ['Funded', 'Completed', 'Cancelled', 'Expired'];
+export const INDUSTRIES = ['Retail', 'Construction', 'Agriculture', 'Logistics', 'Manufacturing', 'Services', 'Wholesale', 'Hospitality', 'Other'];
+
+let NEXT_PORTFOLIO_CLIENT_ID = 1001;
+let PORTFOLIO_CLIENTS = [
+  { id: 1001, companyName: 'Mosweu Trading', regNumber: 'BW00012345', contactPerson: 'Kabo Mosweu', phone: '+26771000001', email: 'kabo@mosweu.co.bw',
+    branch: 'Gaborone', industry: 'Retail', pmId: 2, pmName: 'Mojaboswa',
+    lastContactDate: '2026-06-20', nextFollowUpDate: '2026-07-15', contactStatusNotes: 'Discussed repeat order for August.', preferredContactMethod: 'WhatsApp',
+    notes: 'Reliable repeat client, always pays contribution on time.', createdAt: '2026-02-10T09:00:00' },
+  { id: 1002, companyName: 'TshamaCon Builders', regNumber: 'BW00023456', contactPerson: 'Lesego Tshiamo', phone: '+26772000002', email: 'lesego@tshamacon.co.bw',
+    branch: 'Francistown', industry: 'Construction', pmId: 21, pmName: 'Onkarabile Sello',
+    lastContactDate: '2026-04-02', nextFollowUpDate: '2026-07-05', contactStatusNotes: 'Not contacted since April — flagged for follow-up.', preferredContactMethod: 'Phone',
+    notes: 'Large contracts, seasonal cash flow needs.', createdAt: '2026-01-15T09:00:00' },
+  { id: 1003, companyName: 'Fresh Produce Ltd', regNumber: 'BW00034567', contactPerson: 'Mpho Segokgo', phone: '+26773000003', email: 'mpho@freshproduce.co.bw',
+    branch: 'Maun', industry: 'Agriculture', pmId: 2, pmName: 'Mojaboswa',
+    lastContactDate: '2026-06-25', nextFollowUpDate: '2026-08-01', contactStatusNotes: 'Happy with turnaround time.', preferredContactMethod: 'Email',
+    notes: 'Peak season Oct–Feb.', createdAt: '2026-03-01T09:00:00' },
+];
+
+let NEXT_ASSISTANCE_ID = 5001;
+let ASSISTANCE_RECORDS = [
+  { id: 5001, clientId: 1001, assistanceDate: '2026-03-05', poNumber: 'PO-88213', buyerName: 'Government of Botswana — MTC', goodsDescription: 'Office furniture supply', poValue: 500000, amountFinanced: 400000, clientContribution: 100000, industry: 'Retail', fundingInstitution: 'Ticano Capital', branch: 'Gaborone', status: 'Completed', notes: 'First facility, smooth process.', attachments: [], pmId: 2, pmName: 'Mojaboswa', createdAt: '2026-03-05T10:00:00' },
+  { id: 5002, clientId: 1001, assistanceDate: '2026-05-18', poNumber: 'PO-90044', buyerName: 'Choppies Enterprises', goodsDescription: 'Retail stock replenishment', poValue: 180000, amountFinanced: 150000, clientContribution: 30000, industry: 'Retail', fundingInstitution: 'Ticano Capital', branch: 'Gaborone', status: 'Funded', notes: '', attachments: [], pmId: 2, pmName: 'Mojaboswa', createdAt: '2026-05-18T10:00:00' },
+  { id: 5003, clientId: 1002, assistanceDate: '2026-02-20', poNumber: 'PO-77102', buyerName: 'City of Francistown', goodsDescription: 'Road construction materials', poValue: 900000, amountFinanced: 700000, clientContribution: 200000, industry: 'Construction', fundingInstitution: 'Ticano Capital', branch: 'Francistown', status: 'Completed', notes: '', attachments: [], pmId: 21, pmName: 'Onkarabile Sello', createdAt: '2026-02-20T10:00:00' },
+];
+
+const assistanceCountFor = (clientId) => ASSISTANCE_RECORDS.filter((a) => a.clientId === clientId).length;
+const wasContactedRecently = (lastContactDate, months = 3) => {
+  if (!lastContactDate) return false;
+  const cutoff = Date.now() - months * 30 * 24 * 60 * 60 * 1000;
+  return new Date(lastContactDate).getTime() >= cutoff;
+};
+const decoratePortfolioClient = (c) => ({
+  ...c,
+  clientId: clientIdFor(c.id),
+  assistanceCount: assistanceCountFor(c.id),
+  contactedRecently: wasContactedRecently(c.lastContactDate),
+});
+
+// filters: pmId (scope to one PM), orgWide (SM/Director — ignore pmId scoping
+// unless also provided), branch, search, timeRange ('all'|days), frequency
+// (number or '10+'), contactStatus ('recent'|'stale').
+export const getPortfolioClients = (filters = {}) => {
+  let rows = PORTFOLIO_CLIENTS.map(decoratePortfolioClient);
+  if (filters.pmId && !filters.orgWide) rows = rows.filter((c) => c.pmId === Number(filters.pmId));
+  if (filters.branch && filters.branch !== 'All') rows = rows.filter((c) => c.branch === filters.branch);
+  if (filters.search) {
+    const q = String(filters.search).toLowerCase();
+    rows = rows.filter((c) => c.companyName.toLowerCase().includes(q) || c.contactPerson.toLowerCase().includes(q) || c.clientId.toLowerCase().includes(q));
+  }
+  if (filters.timeRange && filters.timeRange !== 'all') {
+    const days = Number(filters.timeRange);
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    rows = rows.filter((c) => ASSISTANCE_RECORDS.some((a) => a.clientId === c.id && new Date(a.assistanceDate).getTime() >= cutoff));
+  }
+  if (filters.frequency) {
+    if (filters.frequency === '10+') rows = rows.filter((c) => c.assistanceCount >= 10);
+    else rows = rows.filter((c) => c.assistanceCount === Number(filters.frequency));
+  }
+  if (filters.contactStatus === 'recent') rows = rows.filter((c) => c.contactedRecently);
+  if (filters.contactStatus === 'stale') rows = rows.filter((c) => !c.contactedRecently);
+  return ok(rows.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+};
+
+// 360° client profile — full assistance timeline (latest first) + contact history.
+export const getPortfolioClient = (id) => {
+  const c = PORTFOLIO_CLIENTS.find((c) => c.id === Number(id));
+  if (!c) return ok(null);
+  const history = ASSISTANCE_RECORDS.filter((a) => a.clientId === c.id).sort((a, b) => new Date(b.assistanceDate) - new Date(a.assistanceDate));
+  return ok({ ...decoratePortfolioClient(c), history });
+};
+
+export const createPortfolioClient = (data, pm) => {
+  const id = NEXT_PORTFOLIO_CLIENT_ID++;
+  const client = {
+    id,
+    companyName: (data.companyName || '').trim() || 'Unnamed Client',
+    regNumber: data.regNumber || '',
+    contactPerson: data.contactPerson || '',
+    phone: data.phone || '',
+    email: data.email || '',
+    branch: data.branch || pm?.branch || 'Gaborone',
+    industry: data.industry || '',
+    pmId: pm?.id ?? 2,
+    pmName: pm?.name || 'Portfolio Manager',
+    lastContactDate: data.lastContactDate || null,
+    nextFollowUpDate: data.nextFollowUpDate || null,
+    contactStatusNotes: data.contactStatusNotes || '',
+    preferredContactMethod: data.preferredContactMethod || 'Phone',
+    notes: data.notes || '',
+    createdAt: new Date().toISOString(),
+  };
+  PORTFOLIO_CLIENTS = [client, ...PORTFOLIO_CLIENTS];
+  logSystemEvent('Client Portfolio', 'Added client', pm?.name || 'PM', client.companyName);
+  return ok({ message: 'Client added to portfolio', client: decoratePortfolioClient(client) });
+};
+
+// Client details (excluding Client ID, which is permanent).
+export const updatePortfolioClient = (id, data, actor) => {
+  const { id: _drop, clientId: _drop2, ...safeData } = data || {};
+  PORTFOLIO_CLIENTS = PORTFOLIO_CLIENTS.map((c) => (c.id === Number(id) ? { ...c, ...safeData } : c));
+  logSystemEvent('Client Portfolio', 'Updated client', actor || 'PM', PORTFOLIO_CLIENTS.find((c) => c.id === Number(id))?.companyName);
+  return ok({ message: 'Client updated', client: decoratePortfolioClient(PORTFOLIO_CLIENTS.find((c) => c.id === Number(id))) });
+};
+
+// Contact/retention tracking — independent of assistance records.
+export const updatePortfolioClientContact = (id, data, actor) => {
+  PORTFOLIO_CLIENTS = PORTFOLIO_CLIENTS.map((c) => (c.id === Number(id) ? {
+    ...c,
+    lastContactDate: data.lastContactDate ?? c.lastContactDate,
+    nextFollowUpDate: data.nextFollowUpDate ?? c.nextFollowUpDate,
+    contactStatusNotes: data.contactStatusNotes ?? c.contactStatusNotes,
+    preferredContactMethod: data.preferredContactMethod ?? c.preferredContactMethod,
+  } : c));
+  logSystemEvent('Client Portfolio', 'Updated contact record', actor || 'PM', PORTFOLIO_CLIENTS.find((c) => c.id === Number(id))?.companyName);
+  return ok({ message: 'Contact record updated', client: decoratePortfolioClient(PORTFOLIO_CLIENTS.find((c) => c.id === Number(id))) });
+};
+
+// ---- Assistance tracking — manual entry only, never auto-created.
+// Assistance count is always derived from the number of records below. ----
+export const addAssistanceRecord = (clientId, data, actor) => {
+  const id = NEXT_ASSISTANCE_ID++;
+  const client = PORTFOLIO_CLIENTS.find((c) => c.id === Number(clientId));
+  const record = {
+    id,
+    clientId: Number(clientId),
+    assistanceDate: data.assistanceDate || new Date().toISOString().slice(0, 10),
+    poNumber: data.poNumber || '',
+    buyerName: data.buyerName || '',
+    goodsDescription: data.goodsDescription || '',
+    poValue: Number(data.poValue) || 0,
+    amountFinanced: Number(data.amountFinanced) || 0,
+    clientContribution: Number(data.clientContribution) || 0,
+    industry: data.industry || client?.industry || '',
+    fundingInstitution: data.fundingInstitution || '',
+    branch: data.branch || client?.branch || '',
+    status: data.status || 'Funded',
+    notes: data.notes || '',
+    attachments: data.attachments || [],
+    pmId: client?.pmId,
+    pmName: actor || client?.pmName || 'Portfolio Manager',
+    createdAt: new Date().toISOString(),
+  };
+  ASSISTANCE_RECORDS = [record, ...ASSISTANCE_RECORDS];
+  logSystemEvent('Client Portfolio', 'Logged assistance', actor || 'PM', `${client?.companyName || ''} — ${record.poNumber || 'PO'} (${record.status})`);
+  return ok({ message: 'Assistance recorded', record });
+};
+
+export const updateAssistanceRecord = (id, data, actor) => {
+  ASSISTANCE_RECORDS = ASSISTANCE_RECORDS.map((a) => (a.id === Number(id) ? { ...a, ...data } : a));
+  logSystemEvent('Client Portfolio', 'Updated assistance record', actor || 'PM', `#${id}`);
+  return ok({ message: 'Assistance record updated', record: ASSISTANCE_RECORDS.find((a) => a.id === Number(id)) });
+};
+
+export const deleteAssistanceRecord = (id, actor) => {
+  ASSISTANCE_RECORDS = ASSISTANCE_RECORDS.filter((a) => a.id !== Number(id));
+  logSystemEvent('Client Portfolio', 'Deleted assistance record', actor || 'PM', `#${id}`);
+  return ok({ message: 'Assistance record deleted', id });
+};
+
+// ---- Bulk Excel/CSV import — detects existing clients (Client ID priority,
+// then reg number, then phone/email) and updates instead of duplicating. ----
+export const importPortfolioClients = (rows, pm) => {
+  const summary = { received: rows.length, newClients: 0, updated: 0, duplicates: 0, invalid: 0 };
+  const invalidRows = [];
+  rows.forEach((r, idx) => {
+    const companyName = (r.companyName || '').trim();
+    if (!companyName) { summary.invalid++; invalidRows.push({ row: idx + 1, reason: 'Missing company name' }); return; }
+    let existing = null;
+    if (r.clientId) existing = PORTFOLIO_CLIENTS.find((c) => clientIdFor(c.id) === String(r.clientId).trim().toUpperCase());
+    if (!existing && r.regNumber) existing = PORTFOLIO_CLIENTS.find((c) => c.regNumber && c.regNumber === String(r.regNumber).trim());
+    if (!existing && (r.phone || r.email)) {
+      existing = PORTFOLIO_CLIENTS.find((c) =>
+        (r.phone && c.phone && c.phone === String(r.phone).trim()) ||
+        (r.email && c.email && c.email.toLowerCase() === String(r.email).trim().toLowerCase()));
+    }
+    if (existing) {
+      PORTFOLIO_CLIENTS = PORTFOLIO_CLIENTS.map((c) => (c.id === existing.id ? { ...c, ...r, companyName: r.companyName || c.companyName, id: c.id } : c));
+      summary.updated++;
+    } else {
+      const id = NEXT_PORTFOLIO_CLIENT_ID++;
+      const client = {
+        id, companyName, regNumber: r.regNumber || '', contactPerson: r.contactPerson || '', phone: r.phone || '', email: r.email || '',
+        branch: r.branch || pm?.branch || 'Gaborone', industry: r.industry || '', pmId: pm?.id ?? 2, pmName: pm?.name || 'Portfolio Manager',
+        lastContactDate: r.lastContactDate || null, nextFollowUpDate: null, contactStatusNotes: '', preferredContactMethod: r.preferredContactMethod || 'Phone',
+        notes: r.notes || '', createdAt: new Date().toISOString(),
+      };
+      PORTFOLIO_CLIENTS = [client, ...PORTFOLIO_CLIENTS];
+      summary.newClients++;
+    }
+  });
+  logSystemEvent('Client Portfolio', 'Imported clients from Excel', pm?.name || 'PM', `${summary.newClients} new, ${summary.updated} updated, ${summary.invalid} invalid`);
+  return ok({
+    message: `Import complete — ${summary.newClients} new, ${summary.updated} updated, ${summary.invalid} skipped`,
+    summary,
+    invalidRows,
+  });
+};
+
+// Dashboard insight layer — top clients, at-risk clients, repeat conversion.
+export const getPortfolioInsights = (filters = {}) => {
+  let clients = PORTFOLIO_CLIENTS.map(decoratePortfolioClient);
+  if (filters.pmId && !filters.orgWide) clients = clients.filter((c) => c.pmId === Number(filters.pmId));
+  const topClients = [...clients].sort((a, b) => b.assistanceCount - a.assistanceCount).slice(0, 5)
+    .map((c) => ({ clientId: c.clientId, companyName: c.companyName, assistanceCount: c.assistanceCount }));
+  const atRisk = clients.filter((c) => !c.contactedRecently)
+    .map((c) => ({ clientId: c.clientId, companyName: c.companyName, lastContactDate: c.lastContactDate, pmName: c.pmName }));
+  const repeatClients = clients.filter((c) => c.assistanceCount > 1).length;
+  const repeatRate = clients.length ? Math.round((repeatClients / clients.length) * 100) : 0;
+  const relevantIds = new Set(clients.map((c) => c.id));
+  return ok({
+    topClients,
+    atRisk,
+    repeatRate,
+    totalClients: clients.length,
+    totalAssistanceEvents: ASSISTANCE_RECORDS.filter((a) => relevantIds.has(a.clientId)).length,
+  });
+};
 
 // =====================================================================
 //  MARKETING — CLIENT QUESTIONNAIRES / SURVEYS
@@ -2217,21 +2503,47 @@ export const deleteCareer = (id) => {
 
 // ---- Testimonials (Marketing-managed; shown on the public homepage) ----
 let TESTIMONIALS = [
-  { id:1, name:'Kabo Mosweu',    company:'Mosweu Trading',    rating:5, comment:'Ticano helped me fulfil a P500,000 government order I would have had to turn down. The process was fast and the team was incredibly supportive.', branch:'Gaborone',    enabled:true },
-  { id:2, name:'Lesego Tshiamo', company:'TshamaCon Builders', rating:5, comment:'I was sceptical at first but Ticano delivered. Within 4 days my supplier was paid and I could complete my construction project on time.', branch:'Francistown', enabled:true },
-  { id:3, name:'Mpho Segokgo',   company:'Fresh Produce Ltd',  rating:5, comment:'As a small business, we always struggled with cash flow during peak season. Ticano changed everything. Professional, fast, and fair rates.', branch:'Maun',        enabled:true },
-  { id:4, name:'Refilwe Dube',   company:'Dube Distributors',  rating:5, comment:'The Portfolio Manager was exceptional. Always available, always professional. We have now completed 3 successful PO financing deals with Ticano.', branch:'Palapye', enabled:true },
-  { id:5, name:'Onkabetse Tau',  company:'Tau Civil Works',    rating:5, comment:'No amount is too small, they said — and they meant it. They financed our first order of P80,000 and we have grown 5x since then.', branch:'Phikwe',           enabled:true },
+  { id:1, name:'Kabo Mosweu',    company:'Mosweu Trading',    rating:5, comment:'Ticano helped me fulfil a P500,000 government order I would have had to turn down. The process was fast and the team was incredibly supportive.', branch:'Gaborone',    enabled:true, source:'manual' },
+  { id:2, name:'Lesego Tshiamo', company:'TshamaCon Builders', rating:5, comment:'I was sceptical at first but Ticano delivered. Within 4 days my supplier was paid and I could complete my construction project on time.', branch:'Francistown', enabled:true, source:'manual' },
+  { id:3, name:'Mpho Segokgo',   company:'Fresh Produce Ltd',  rating:5, comment:'As a small business, we always struggled with cash flow during peak season. Ticano changed everything. Professional, fast, and fair rates.', branch:'Maun',        enabled:true, source:'manual' },
+  { id:4, name:'Refilwe Dube',   company:'Dube Distributors',  rating:5, comment:'The Portfolio Manager was exceptional. Always available, always professional. We have now completed 3 successful PO financing deals with Ticano.', branch:'Palapye', enabled:true, source:'manual' },
+  { id:5, name:'Onkabetse Tau',  company:'Tau Civil Works',    rating:5, comment:'No amount is too small, they said — and they meant it. They financed our first order of P80,000 and we have grown 5x since then.', branch:'Phikwe',           enabled:true, source:'manual' },
 ];
 let NEXT_TESTIMONIAL_ID = 100;
 
-// Public homepage — only enabled testimonials.
-export const getPublicTestimonials = () => ok(TESTIMONIALS.filter((t) => t.enabled));
-// Management view (Marketing) — all testimonials.
-export const getAllTestimonials = () => ok([...TESTIMONIALS]);
+// Automatically pull in 5-star customer satisfaction survey responses as testimonials.
+// Runs on every read so newly-closed, 5-star-rated complaints surface without manual effort.
+// Marketing can delete an auto-picked testimonial (it will not reappear) or add their own
+// text-based testimonial (e.g. a quote a client sent over WhatsApp/SMS) via createTestimonial.
+const DISMISSED_AUTO_TESTIMONIALS = new Set();
+const syncAutoTestimonials = () => {
+  const existingComplaintIds = new Set(TESTIMONIALS.filter((t) => t.sourceComplaintId).map((t) => t.sourceComplaintId));
+  COMPLAINTS.forEach((c) => {
+    if (!c.satisfaction || Number(c.satisfaction.rating) !== 5) return;
+    if (!c.satisfaction.comments || !c.satisfaction.comments.trim()) return;
+    if (existingComplaintIds.has(c.id) || DISMISSED_AUTO_TESTIMONIALS.has(c.id)) return;
+    TESTIMONIALS = [{
+      id: NEXT_TESTIMONIAL_ID++,
+      name: c.customerName,
+      company: '',
+      rating: 5,
+      comment: c.satisfaction.comments,
+      branch: c.branch,
+      enabled: true,
+      source: 'survey',
+      sourceComplaintId: c.id,
+    }, ...TESTIMONIALS];
+  });
+};
+
+// Public homepage — only enabled testimonials (auto-picked 5-star reviews included).
+export const getPublicTestimonials = () => { syncAutoTestimonials(); return ok(TESTIMONIALS.filter((t) => t.enabled)); };
+// Management view (Marketing) — all testimonials, including auto-picked 5-star reviews.
+export const getAllTestimonials = () => { syncAutoTestimonials(); return ok([...TESTIMONIALS]); };
 export const createTestimonial = (data) => {
-  const t = { id: NEXT_TESTIMONIAL_ID++, rating: 5, enabled: true, branch: 'Gaborone', ...data };
+  const t = { id: NEXT_TESTIMONIAL_ID++, rating: 5, enabled: true, branch: 'Gaborone', source: 'manual', ...data };
   TESTIMONIALS = [t, ...TESTIMONIALS];
+  logSystemEvent('Marketing', 'Added testimonial', 'Marketing', t.name);
   return ok({ message: 'Testimonial added', testimonial: t });
 };
 export const updateTestimonial = (id, data) => {
@@ -2239,7 +2551,10 @@ export const updateTestimonial = (id, data) => {
   return ok({ message: 'Testimonial updated', id });
 };
 export const deleteTestimonial = (id) => {
+  const t = TESTIMONIALS.find((t) => t.id === Number(id));
+  if (t?.sourceComplaintId) DISMISSED_AUTO_TESTIMONIALS.add(t.sourceComplaintId);
   TESTIMONIALS = TESTIMONIALS.filter((t) => t.id !== Number(id));
+  logSystemEvent('Marketing', 'Removed testimonial', 'Marketing', t?.name || `#${id}`);
   return ok({ message: 'Testimonial removed', id });
 };
 export const setTestimonialEnabled = (id, enabled) => {

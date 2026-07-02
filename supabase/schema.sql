@@ -1,912 +1,818 @@
 -- =====================================================================
---  TICANO GROUP — SUPABASE / POSTGRES SCHEMA
---  Trade-finance complaint & client-management platform (Botswana, NBFIRA).
+--  TICANO GROUP — PostgreSQL Database Schema
+--  Trade-finance complaint, client & marketing platform (Botswana SME)
 --
---  Grounded in the application's in-memory data layer (src/services/api.js)
---  and enums (src/utils/constants.js). Designed to run on Supabase
---  (PostgreSQL 15+) with Auth + Row Level Security.
+--  Target: PostgreSQL 14+ (Supabase)
+--  Grounded in the application's data layer (src/services/api.js +
+--  src/utils/constants.js). Replaces the in-memory mock store.
+--  Updated to cover the Client Portfolio (PM CRM) module, the merged
+--  system-wide audit log, auto-picked 5-star testimonials, and the
+--  homepage promo flyer/image field added after the original version
+--  of this schema.
 --
---  Run order: this file is idempotent-ish and ordered (extensions → enums →
---  helpers → tables → indexes → RLS → storage → seed notes).
+--  Conventions
+--   - snake_case identifiers, plural table names
+--   - BIGINT identity primary keys
+--   - TIMESTAMPTZ for all timestamps (store UTC)
+--   - CITEXT for emails (case-insensitive uniqueness)
+--   - ENUM types for fixed vocabularies; lookup tables for
+--     business-extensible lists (categories, referral sources)
+--   - ON DELETE chosen per relationship (RESTRICT by default,
+--     CASCADE for child/detail rows, SET NULL for soft references)
+--
+--  Auth note: `users` is this schema's own identity table (with its own
+--  password_hash), not Supabase Auth's auth.users. If you adopt Supabase
+--  Auth instead, add a `auth_user_id UUID REFERENCES auth.users(id)`
+--  column to `users` and base RLS policies on auth.uid() via that column.
+--  RLS is intentionally not included below — add it once the auth
+--  approach (custom vs Supabase Auth) is decided, mirroring the app's
+--  role scopes (PM → own complaints/portfolio clients only, Service
+--  Manager → own branch, Director/Admin → everything, Customer → own
+--  records only).
 -- =====================================================================
 
--- ---------------------------------------------------------------------
--- 0. EXTENSIONS
--- ---------------------------------------------------------------------
-create extension if not exists pgcrypto;      -- gen_random_uuid()
-create extension if not exists citext;         -- case-insensitive email
+BEGIN;
 
+CREATE EXTENSION IF NOT EXISTS citext;     -- case-insensitive email
+CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- gen_random_uuid(), if needed
 
 -- ---------------------------------------------------------------------
--- 1. ENUMERATED TYPES  (values match the app exactly so no mapping layer)
+--  Shared trigger: keep updated_at current on UPDATE
 -- ---------------------------------------------------------------------
-create type user_role            as enum ('customer','portfolio_manager','service_manager','director','marketing','admin');
-create type client_type          as enum ('new','existing');
-create type lead_status          as enum ('New','Contacted','Interested','Converted','Lost');
-create type journey_stage        as enum ('before_applying','during_application','after_disbursement');
-create type complaint_status     as enum ('created','assigned','in_progress','customer_contacted','pending_customer','escalated','resolved','closed');
-create type complaint_severity   as enum ('minor','moderate','major','critical');
-create type complaint_priority   as enum ('low','medium','high','urgent');
-create type sentiment_tag        as enum ('positive','neutral','negative','urgent_concern');
-create type note_audience        as enum ('internal','customer');
-create type application_status   as enum ('New','Under Review','Shortlisted','Rejected','Hired');
-create type questionnaire_status as enum ('draft','published');
-create type question_type        as enum ('rating','choice','text');
-create type career_type          as enum ('Full-time','Part-time','Internship','Contract','Temporary');
-create type announcement_priority as enum ('info','normal','high');
-create type promo_mode           as enum ('banner','popup');
-create type promo_theme          as enum ('red','charcoal','light');
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
+-- =====================================================================
+--  1. ENUM TYPES  (fixed vocabularies from constants.js)
+-- =====================================================================
+CREATE TYPE user_role          AS ENUM ('customer','portfolio_manager','service_manager','director','marketing','admin');
+CREATE TYPE client_type        AS ENUM ('new','existing');
+CREATE TYPE journey_stage      AS ENUM ('before_applying','during_application','after_disbursement');
+CREATE TYPE complaint_status   AS ENUM ('created','assigned','in_progress','customer_contacted','pending_customer','escalated','resolved','closed');
+CREATE TYPE complaint_severity AS ENUM ('minor','moderate','major','critical');
+CREATE TYPE complaint_priority AS ENUM ('low','medium','high','urgent');
+CREATE TYPE complaint_sentiment AS ENUM ('positive','neutral','negative','urgent_concern');
+CREATE TYPE escalation_level   AS ENUM ('service_manager','director');
+CREATE TYPE root_cause_group   AS ENUM ('Service Issues','Process Issues','System Issues');
+CREATE TYPE note_type          AS ENUM ('internal','customer');
+CREATE TYPE feedback_source    AS ENUM ('client_portal','public_link','survey');
+CREATE TYPE lead_status        AS ENUM ('New','Contacted','Interested','Converted','Lost');
+CREATE TYPE application_status AS ENUM ('New','Under Review','Shortlisted','Rejected','Hired');
+CREATE TYPE content_status     AS ENUM ('draft','published');
+CREATE TYPE announcement_priority AS ENUM ('info','normal','high');
+CREATE TYPE question_type      AS ENUM ('rating','choice','text');
+CREATE TYPE career_type        AS ENUM ('Full-time','Part-time','Internship','Voluntary');
+CREATE TYPE promo_mode         AS ENUM ('banner','popup');
+CREATE TYPE promo_theme        AS ENUM ('red','charcoal','light');
+CREATE TYPE legal_doc_type     AS ENUM ('privacy','terms','cookie');
+CREATE TYPE notify_channel     AS ENUM ('whatsapp','email','sms');
+CREATE TYPE assistance_status  AS ENUM ('Funded','Completed','Cancelled','Expired');
+CREATE TYPE contact_method     AS ENUM ('Phone','WhatsApp','Email','Physical visit');
+CREATE TYPE testimonial_source AS ENUM ('manual','survey');
 
--- ---------------------------------------------------------------------
--- 2. GENERIC HELPERS
--- ---------------------------------------------------------------------
+-- =====================================================================
+--  2. REFERENCE / LOOKUP TABLES
+-- =====================================================================
 
--- Keep updated_at fresh on UPDATE.
-create or replace function public.set_updated_at()
-returns trigger language plpgsql as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$;
-
--- NOTE: the role/branch helper functions (current_app_role, current_branch_id,
--- is_org_wide, is_staff) are defined just AFTER the profiles table below,
--- because they query it and `language sql` bodies are validated at creation.
-
-
--- ---------------------------------------------------------------------
--- 3. BRANCHES
---    Mirrors BRANCH_DIRECTORY / BRANCH_INFO. Single source of truth for
---    the map, landing page and admin branch manager.
--- ---------------------------------------------------------------------
-create table public.branches (
-  id           uuid primary key default gen_random_uuid(),
-  name         text not null,
-  address      text,
-  city         text,
-  region       text,
-  country      text not null default 'Botswana',
-  phone        text,
-  mobile       text,
-  email        citext,
-  manager_name text,
-  open_hours   text default 'Mon–Fri 08:00–17:00, Sat 09:00–12:00',
-  lat          double precision,
-  lng          double precision,
-  service_areas text[] default '{}',          -- BRANCH_INFO.areas
-  is_active    boolean not null default true,
-  notes        text,
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
+-- Branches (BRANCH_DIRECTORY). "Head Office" included for director/admin/marketing.
+CREATE TABLE branches (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name         TEXT NOT NULL UNIQUE,
+  is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+  address      TEXT,
+  city         TEXT,
+  country      TEXT NOT NULL DEFAULT 'Botswana',
+  phone        TEXT,
+  email        CITEXT,
+  manager_name TEXT,
+  latitude     NUMERIC(9,6),
+  longitude    NUMERIC(9,6),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-create trigger trg_branches_updated before update on public.branches
-  for each row execute function public.set_updated_at();
+CREATE TRIGGER trg_branches_updated BEFORE UPDATE ON branches
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-
--- ---------------------------------------------------------------------
--- 4. PROFILES  (1:1 with auth.users — every login, staff or client)
--- ---------------------------------------------------------------------
-create table public.profiles (
-  id              uuid primary key references auth.users(id) on delete cascade,
-  role            user_role not null default 'customer',
-  full_name       text not null,
-  email           citext unique,
-  phone           text,
-  whatsapp_number text,
-  branch_id       uuid references public.branches(id) on delete set null,
-  -- customer-only attributes (null for staff)
-  client_type     client_type,
-  is_active       boolean not null default true,
-  -- notification opt-ins (profile / birthday prefs)
-  whatsapp_optin  boolean not null default false,
-  birthday_optin  boolean not null default true,
-  created_at      timestamptz not null default now(),
-  updated_at      timestamptz not null default now()
+-- Complaint categories grouped by journey stage (COMPLAINT_CATEGORIES).
+CREATE TABLE complaint_categories (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  journey_stage journey_stage NOT NULL,
+  name          TEXT NOT NULL,
+  is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+  UNIQUE (journey_stage, name)
 );
-create index on public.profiles (role);
-create index on public.profiles (branch_id);
-create trigger trg_profiles_updated before update on public.profiles
-  for each row execute function public.set_updated_at();
 
--- Auto-create a profile row when a new auth user signs up.
-create or replace function public.handle_new_user()
-returns trigger language plpgsql security definer set search_path = public as $$
-begin
-  insert into public.profiles (id, full_name, email, role)
-  values (new.id,
-          coalesce(new.raw_user_meta_data->>'full_name', new.email),
-          new.email,
-          coalesce((new.raw_user_meta_data->>'role')::user_role, 'customer'))
-  on conflict (id) do nothing;
-  return new;
-end;
-$$;
-create trigger trg_auth_user_created
-  after insert on auth.users
-  for each row execute function public.handle_new_user();
-
--- ---- Role / branch helpers (defined here because they query profiles) ----
--- SECURITY DEFINER so RLS policies can call them without recursing into
--- profiles' own policies.
-
--- Role of the currently authenticated user.
-create or replace function public.current_app_role()
-returns user_role
-language sql stable security definer set search_path = public as $$
-  select role from public.profiles where id = auth.uid()
-$$;
-
--- Branch of the currently authenticated user (NULL for head-office roles).
-create or replace function public.current_branch_id()
-returns uuid
-language sql stable security definer set search_path = public as $$
-  select branch_id from public.profiles where id = auth.uid()
-$$;
-
--- Convenience predicate: caller has org-wide visibility.
-create or replace function public.is_org_wide()
-returns boolean
-language sql stable security definer set search_path = public as $$
-  select public.current_app_role() in ('director','admin','marketing')
-$$;
-
--- Convenience predicate: caller is back-office staff (any non-customer role).
-create or replace function public.is_staff()
-returns boolean
-language sql stable security definer set search_path = public as $$
-  select public.current_app_role() in
-    ('portfolio_manager','service_manager','director','marketing','admin')
-$$;
-
-grant execute on function
-  public.current_app_role(), public.current_branch_id(),
-  public.is_org_wide(), public.is_staff()
-to anon, authenticated;
-
-
--- ---------------------------------------------------------------------
--- 5. CLIENTS  (CRM master — the businesses complaints/tenders target)
---    A client may or may not have a login (profile_id). Walk-ins and
---    anonymous complainants need no auth user, hence the separation.
---    client_code is the permanent TIC-000001 identifier.
--- ---------------------------------------------------------------------
-create table public.clients (
-  id           uuid primary key default gen_random_uuid(),
-  client_no    bigint generated by default as identity,         -- numeric backbone
-  client_code  text generated always as ('TIC-' || lpad(client_no::text, 6, '0')) stored,
-  profile_id   uuid unique references public.profiles(id) on delete set null,
-  full_name    text not null,
-  email        citext,
-  phone        text,
-  branch_id    uuid references public.branches(id) on delete set null,
-  client_type  client_type not null default 'new',
-  industry     text,
-  assigned_pm_id uuid references public.profiles(id) on delete set null,
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
+-- Referral sources (REFERRAL_SOURCES) — used by leads & client registration.
+CREATE TABLE referral_sources (
+  id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name      TEXT NOT NULL UNIQUE,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
-create unique index on public.clients (client_code);
-create index on public.clients (branch_id);
-create index on public.clients (assigned_pm_id);
-create trigger trg_clients_updated before update on public.clients
-  for each row execute function public.set_updated_at();
 
+-- =====================================================================
+--  3. IDENTITY: users + role-specific profiles
+-- =====================================================================
 
--- ---------------------------------------------------------------------
--- 6. LEADS  (sales / referral pipeline before a lead becomes a client)
--- ---------------------------------------------------------------------
-create table public.leads (
-  id              uuid primary key default gen_random_uuid(),
-  full_name       text not null,
-  phone           text not null,
-  email           citext,
-  branch_id       uuid references public.branches(id) on delete set null,
-  referral_source text,        -- REFERRAL_SOURCES
-  recorded_via    text,        -- REFERRAL_RECORDED_BY
-  product         text,        -- INTERESTED_PRODUCTS
-  status          lead_status not null default 'New',
-  added_by_id     uuid references public.profiles(id) on delete set null,
-  added_by_name   text,        -- denormalised label (imports/system)
-  converted_client_id uuid references public.clients(id) on delete set null,
-  notes           text,
-  created_at      timestamptz not null default now(),
-  updated_at      timestamptz not null default now()
+-- Unified account for every person who can authenticate (clients + staff).
+CREATE TABLE users (
+  id                   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  full_name            TEXT NOT NULL,
+  email                CITEXT UNIQUE,                 -- nullable: anonymous/lead-only contacts
+  whatsapp_number      TEXT,
+  password_hash        TEXT,                          -- NULL until set; bcrypt/argon2
+  role                 user_role NOT NULL,
+  branch_id            BIGINT REFERENCES branches(id) ON DELETE SET NULL,
+  avatar_url           TEXT,
+  is_active            BOOLEAN NOT NULL DEFAULT TRUE,
+  must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+  last_login_at        TIMESTAMPTZ,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-create index on public.leads (branch_id);
-create index on public.leads (status);
--- de-dup support for bulk import (phone digits + name)
-create index on public.leads (phone);
-create trigger trg_leads_updated before update on public.leads
-  for each row execute function public.set_updated_at();
+CREATE TRIGGER trg_users_updated BEFORE UPDATE ON users
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX idx_users_role   ON users(role);
+CREATE INDEX idx_users_branch ON users(branch_id);
 
-
--- ---------------------------------------------------------------------
--- 7. COMPLAINTS  (the core lifecycle entity)
---    Created → Assigned → In Progress → Customer Contacted →
---    Pending Customer → Escalated → Resolved → Closed
--- ---------------------------------------------------------------------
-create table public.complaints (
-  id               uuid primary key default gen_random_uuid(),
-  ticket_no        bigint generated by default as identity,
-  ticket           text generated always as ('TCN-' || lpad(ticket_no::text, 4, '0')) stored,
-  client_id        uuid references public.clients(id) on delete set null,  -- null when anonymous
-  customer_name    text,                 -- snapshot or ANON-xxxxxx label
-  client_type      client_type not null default 'existing',
-  anonymous        boolean not null default false,
-  branch_id        uuid not null references public.branches(id),
-  journey_stage    journey_stage not null,
-  category         text not null,
-  description      text not null,
-  voice_note_path  text,                 -- Supabase Storage object path
-  severity         complaint_severity not null default 'moderate',
-  priority         complaint_priority not null default 'medium',
-  sentiment        sentiment_tag not null default 'neutral',
-  status           complaint_status not null default 'created',
-  assigned_pm_id   uuid references public.profiles(id) on delete set null,
-  -- escalation (inlined — single escalation per complaint in the app)
-  escalated_at     timestamptz,
-  escalated_by     text,
-  escalation_reason text,
-  -- root cause (required on closure)
-  root_cause_group text,
-  root_cause       text,
-  root_cause_notes text,
-  created_at       timestamptz not null default now(),
-  resolved_at      timestamptz,
-  closed_at        timestamptz,
-  updated_at       timestamptz not null default now()
+-- Customer-specific profile (1:1 with users where role = 'customer').
+-- client_code renders the TIC-000001 identifier seen in the app.
+CREATE TABLE client_profiles (
+  user_id                    BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  client_code                TEXT GENERATED ALWAYS AS ('TIC-' || lpad(user_id::text, 6, '0')) STORED,
+  client_type                client_type NOT NULL DEFAULT 'new',
+  industry                   TEXT,
+  occupation                 TEXT,
+  gender                     TEXT,
+  marital_status             TEXT,
+  nationality                TEXT DEFAULT 'Motswana',
+  physical_address           TEXT,
+  city                       TEXT,
+  base_location              TEXT,
+  preferred_branch_id        BIGINT REFERENCES branches(id) ON DELETE SET NULL,
+  assigned_pm_id             BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  emergency_contact_name     TEXT,
+  emergency_contact_number   TEXT,
+  referral_source_id         BIGINT REFERENCES referral_sources(id) ON DELETE SET NULL,
+  referral_other_text        TEXT,
+  -- opt-ins (§14 birthday, §16 location, tender alerts)
+  location_sharing_opt_in    BOOLEAN NOT NULL DEFAULT TRUE,
+  birthday_messages_opt_in   BOOLEAN NOT NULL DEFAULT FALSE,
+  date_of_birth              DATE,                       -- only stored if opted in
+  tender_notifications_opt_in BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at                 TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-create index on public.complaints (branch_id);
-create index on public.complaints (status);
-create index on public.complaints (assigned_pm_id);
-create index on public.complaints (client_id);
-create index on public.complaints (created_at desc);
-create trigger trg_complaints_updated before update on public.complaints
-  for each row execute function public.set_updated_at();
+CREATE TRIGGER trg_client_profiles_updated BEFORE UPDATE ON client_profiles
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX idx_client_profiles_pm     ON client_profiles(assigned_pm_id);
+CREATE INDEX idx_client_profiles_type   ON client_profiles(client_type);
 
--- 7a. Timeline events (status history shown in the complaint detail view)
-create table public.complaint_events (
-  id           uuid primary key default gen_random_uuid(),
-  complaint_id uuid not null references public.complaints(id) on delete cascade,
-  event        text not null,
+-- Staff-specific profile (1:1 with users where role != 'customer').
+-- staff_code renders the TIC-0001 identifier seen in the app.
+CREATE TABLE staff_profiles (
+  user_id            BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  staff_code         TEXT GENERATED ALWAYS AS ('TIC-' || lpad(user_id::text, 4, '0')) STORED,
+  job_title          TEXT,
+  -- PM matchmaking data (PM_DIRECTORY.categoryStrengths)
+  category_strengths TEXT[] NOT NULL DEFAULT '{}',
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_staff_profiles_updated BEFORE UPDATE ON staff_profiles
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Per-user notification preferences (Profile › Preferences toggles).
+CREATE TABLE user_preferences (
+  user_id          BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  notify_email     BOOLEAN NOT NULL DEFAULT TRUE,
+  notify_whatsapp  BOOLEAN NOT NULL DEFAULT TRUE,
+  notify_in_app    BOOLEAN NOT NULL DEFAULT TRUE,
+  dark_mode        BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+-- Birthday messaging preference (BIRTHDAY_PREFS).
+CREATE TABLE birthday_preferences (
+  user_id       BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  enabled       BOOLEAN NOT NULL DEFAULT FALSE,
+  channel       notify_channel NOT NULL DEFAULT 'whatsapp',
+  birthday_date DATE
+);
+
+-- =====================================================================
+--  4. COMPLAINT TRACKING  (core domain)
+-- =====================================================================
+
+-- App-generated human ticket id is TCN-0001. Sequence backs that format.
+CREATE SEQUENCE complaint_ticket_seq START 1;
+
+CREATE TABLE complaints (
+  id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ticket           TEXT NOT NULL UNIQUE,             -- e.g. 'TCN-0001'
+  -- reporter: customer_id NULL when anonymous; snapshot name retained
+  customer_id      BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  customer_name    TEXT NOT NULL,                    -- snapshot, or ANON-000001
+  anonymous        BOOLEAN NOT NULL DEFAULT FALSE,
+  anonymous_code   TEXT,                             -- 'ANON-000001' when anonymous
+  client_type      client_type,
+  -- classification
+  journey_stage    journey_stage NOT NULL,
+  category_id      BIGINT REFERENCES complaint_categories(id) ON DELETE RESTRICT,
+  category_name    TEXT NOT NULL,                    -- snapshot (categories may be 'Other')
+  severity         complaint_severity NOT NULL,
+  priority         complaint_priority NOT NULL,
+  sentiment        complaint_sentiment NOT NULL DEFAULT 'neutral',
+  status           complaint_status NOT NULL DEFAULT 'created',
+  description      TEXT NOT NULL,
+  branch_id        BIGINT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  assigned_pm_id   BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  -- root cause (set on resolution)
+  root_cause_group root_cause_group,
+  root_cause       TEXT,
+  root_cause_notes TEXT,
+  -- lifecycle timestamps
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at      TIMESTAMPTZ,
+  closed_at        TIMESTAMPTZ,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_complaints_updated BEFORE UPDATE ON complaints
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX idx_complaints_status   ON complaints(status);
+CREATE INDEX idx_complaints_branch   ON complaints(branch_id);
+CREATE INDEX idx_complaints_pm       ON complaints(assigned_pm_id);
+CREATE INDEX idx_complaints_customer ON complaints(customer_id);
+CREATE INDEX idx_complaints_created  ON complaints(created_at);
+
+-- Escalation events (PM → Service Manager → Director).
+CREATE TABLE complaint_escalations (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  complaint_id BIGINT NOT NULL REFERENCES complaints(id) ON DELETE CASCADE,
+  escalated_by TEXT NOT NULL,                        -- actor name (or user_id ref)
+  escalated_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  escalated_to escalation_level NOT NULL DEFAULT 'service_manager',
+  reason       TEXT NOT NULL,
+  escalated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at  TIMESTAMPTZ
+);
+CREATE INDEX idx_escalations_complaint ON complaint_escalations(complaint_id);
+
+-- Ordered lifecycle timeline (complaint.timeline[]).
+CREATE TABLE complaint_timeline (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  complaint_id BIGINT NOT NULL REFERENCES complaints(id) ON DELETE CASCADE,
+  event        TEXT NOT NULL,
   status       complaint_status,
-  actor        text,
-  occurred_at  timestamptz not null default now()
+  actor        TEXT NOT NULL,
+  occurred_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-create index on public.complaint_events (complaint_id, occurred_at);
+CREATE INDEX idx_timeline_complaint ON complaint_timeline(complaint_id, occurred_at);
 
--- 7b. Notes — internal (staff-only) OR customer-facing updates
-create table public.complaint_notes (
-  id           uuid primary key default gen_random_uuid(),
-  complaint_id uuid not null references public.complaints(id) on delete cascade,
-  audience     note_audience not null default 'internal',
-  author_id    uuid references public.profiles(id) on delete set null,
-  author_name  text,
-  body         text not null,
-  created_at   timestamptz not null default now()
+-- Internal + customer-facing notes (complaint.internalNotes / customerNotes).
+CREATE TABLE complaint_notes (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  complaint_id  BIGINT NOT NULL REFERENCES complaints(id) ON DELETE CASCADE,
+  note_type     note_type NOT NULL,
+  author        TEXT NOT NULL,
+  author_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  body          TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-create index on public.complaint_notes (complaint_id);
+CREATE INDEX idx_notes_complaint ON complaint_notes(complaint_id);
 
--- 7c. Immutable audit trail (§15) — who did what, when, old→new status
-create table public.complaint_audit (
-  id             uuid primary key default gen_random_uuid(),
-  complaint_id   uuid not null references public.complaints(id) on delete cascade,
-  ticket         text,
-  action         text not null,           -- Created / Assigned / Escalated / ...
-  previous_value text,
-  new_value      text,
-  actor_id       uuid references public.profiles(id) on delete set null,
-  actor_name     text,
-  occurred_at    timestamptz not null default now()
-);
-create index on public.complaint_audit (complaint_id, occurred_at);
-
--- 7d. Post-closure satisfaction survey (1:1)
-create table public.complaint_satisfaction (
-  complaint_id            uuid primary key references public.complaints(id) on delete cascade,
-  issue_resolved          boolean,
-  communication_ok        boolean,
-  pm_professional         boolean,
-  rating                  smallint check (rating between 1 and 5),
-  comments                text,
-  submitted_at            timestamptz not null default now()
+-- Post-resolution satisfaction survey (complaint.satisfaction).
+CREATE TABLE complaint_satisfaction (
+  complaint_id              BIGINT PRIMARY KEY REFERENCES complaints(id) ON DELETE CASCADE,
+  submitted_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+  issue_resolved            BOOLEAN,
+  communication_satisfactory BOOLEAN,
+  pm_professional           BOOLEAN,
+  rating                    SMALLINT CHECK (rating BETWEEN 1 AND 5),
+  comments                  TEXT
 );
 
-
--- ---------------------------------------------------------------------
--- 8. IMPROVEMENT FEEDBACK (§3) — suggestions, separate from complaints
--- ---------------------------------------------------------------------
-create table public.improvement_feedback (
-  id          uuid primary key default gen_random_uuid(),
-  category    text not null,        -- IMPROVEMENT_CATEGORIES
-  body        text not null,
-  author_name text default 'Anonymous',
-  is_anonymous boolean not null default false,
-  branch_id   uuid references public.branches(id) on delete set null,
-  created_at  timestamptz not null default now()
+-- Immutable audit trail (§15) — every state change appends a row.
+CREATE TABLE complaint_audit_log (
+  id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  complaint_id   BIGINT REFERENCES complaints(id) ON DELETE SET NULL,
+  ticket         TEXT,
+  performed_by   TEXT NOT NULL,
+  action         TEXT NOT NULL,
+  previous_value TEXT,
+  new_value      TEXT,
+  occurred_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-create index on public.improvement_feedback (branch_id);
-create index on public.improvement_feedback (category);
-
-
--- ---------------------------------------------------------------------
--- 9. KNOWLEDGE BASE (§8)
--- ---------------------------------------------------------------------
-create table public.kb_articles (
-  id         uuid primary key default gen_random_uuid(),
-  category   text not null,         -- KB_CATEGORIES
-  title      text not null,
-  body       text not null,
-  author_id  uuid references public.profiles(id) on delete set null,
-  author_name text default 'Admin',
-  archived   boolean not null default false,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-create index on public.kb_articles (category) where archived = false;
-create trigger trg_kb_updated before update on public.kb_articles
-  for each row execute function public.set_updated_at();
-
-
--- ---------------------------------------------------------------------
--- 10. QUESTIONNAIRES (Marketing surveys) + responses
--- ---------------------------------------------------------------------
-create table public.questionnaires (
-  id          uuid primary key default gen_random_uuid(),
-  title       text not null,
-  description text,
-  status      questionnaire_status not null default 'draft',
-  author_id   uuid references public.profiles(id) on delete set null,
-  author_name text default 'Marketing Team',
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
-);
-create trigger trg_qn_updated before update on public.questionnaires
-  for each row execute function public.set_updated_at();
-
-create table public.questionnaire_questions (
-  id               uuid primary key default gen_random_uuid(),
-  questionnaire_id uuid not null references public.questionnaires(id) on delete cascade,
-  position         int not null default 0,
-  type             question_type not null,
-  text             text not null,
-  options          text[]                          -- for type = 'choice'
-);
-create index on public.questionnaire_questions (questionnaire_id, position);
-
-create table public.questionnaire_responses (
-  id               uuid primary key default gen_random_uuid(),
-  questionnaire_id uuid not null references public.questionnaires(id) on delete cascade,
-  client_id        uuid references public.clients(id) on delete set null,
-  client_name      text,
-  answers          jsonb not null default '{}',     -- { question_id: value }
-  submitted_at     timestamptz not null default now()
-);
-create index on public.questionnaire_responses (questionnaire_id);
-
-
--- ---------------------------------------------------------------------
--- 11. TENDER BROADCASTS (Marketing) + public opt-in subscribers
--- ---------------------------------------------------------------------
-create table public.tender_broadcasts (
-  id              uuid primary key default gen_random_uuid(),
-  title           text not null,
-  body            text not null,
-  channels        text[] not null default '{dashboard}',  -- dashboard/email/whatsapp
-  audience_filter jsonb not null default '{}',             -- {branch,clientType,industry,status}
-  recipient_count int not null default 0,
-  sent_by_id      uuid references public.profiles(id) on delete set null,
-  sent_by_name    text,
-  is_public       boolean not null default true,           -- surfaces on landing page
-  sent_at         timestamptz not null default now()
-);
-create index on public.tender_broadcasts (sent_at desc);
-
-create table public.tender_subscribers (
-  id           uuid primary key default gen_random_uuid(),
-  email        citext not null unique,
-  phone        text,
-  subscribed_at timestamptz not null default now()
-);
-
-
--- ---------------------------------------------------------------------
--- 12. CAREERS + job applications
--- ---------------------------------------------------------------------
-create table public.careers (
-  id           uuid primary key default gen_random_uuid(),
-  title        text not null,
-  type         career_type not null default 'Full-time',
-  location     text,
-  department   text,
-  description  text,
-  requirements text,
-  closing_date date,
-  is_active    boolean not null default true,     -- published to public site
-  published_at timestamptz not null default now(),
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
-);
-create index on public.careers (is_active);
-create trigger trg_careers_updated before update on public.careers
-  for each row execute function public.set_updated_at();
-
-create table public.job_applications (
-  id             uuid primary key default gen_random_uuid(),
-  career_id      uuid references public.careers(id) on delete set null,
-  position       text,                              -- snapshot of title
-  applicant_name text not null,
-  email          citext not null,
-  phone          text,
-  cover_note     text,
-  cv_path        text,                              -- Storage object path
-  cv_file_name   text,
-  cv_mime_type   text,
-  cv_size_bytes  bigint,
-  status         application_status not null default 'New',
-  applied_at     timestamptz not null default now()
-);
-create index on public.job_applications (career_id);
-create index on public.job_applications (status);
-
-
--- ---------------------------------------------------------------------
--- 13. TESTIMONIALS (Marketing-managed, shown on homepage)
--- ---------------------------------------------------------------------
-create table public.testimonials (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null,
-  company    text,
-  rating     smallint not null default 5 check (rating between 1 and 5),
-  comment    text not null,
-  branch_id  uuid references public.branches(id) on delete set null,
-  is_enabled boolean not null default true,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-create trigger trg_testimonials_updated before update on public.testimonials
-  for each row execute function public.set_updated_at();
-
-
--- ---------------------------------------------------------------------
--- 14. ANNOUNCEMENTS (Director / Admin — role-targeted internal notices)
--- ---------------------------------------------------------------------
-create table public.announcements (
-  id           uuid primary key default gen_random_uuid(),
-  title        text not null,
-  body         text not null,
-  author_id    uuid references public.profiles(id) on delete set null,
-  author_name  text,
-  author_role  user_role,
-  target_roles user_role[] not null default '{}',
-  priority     announcement_priority not null default 'normal',
-  status       questionnaire_status not null default 'draft',   -- draft / published
-  start_date   date,
-  end_date     date,
-  pinned       boolean not null default false,
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
-);
-create index on public.announcements (status);
-create trigger trg_announcements_updated before update on public.announcements
-  for each row execute function public.set_updated_at();
-
-
--- ---------------------------------------------------------------------
--- 15. REVIEW REQUESTS (WhatsApp review links)
--- ---------------------------------------------------------------------
-create table public.review_requests (
-  id          uuid primary key default gen_random_uuid(),
-  recipient   text not null,
-  phone       text,
-  kind        text not null default 'customer',   -- customer | lead
-  sent_by_id  uuid references public.profiles(id) on delete set null,
-  sent_by_name text,
-  completed   boolean not null default false,
-  sent_at     timestamptz not null default now()
-);
-
-
--- ---------------------------------------------------------------------
--- 16. NOTIFICATIONS (per-user in-app notifications, deep-linkable)
--- ---------------------------------------------------------------------
-create table public.notifications (
-  id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references public.profiles(id) on delete cascade,
-  title       text not null,
-  body        text,
-  link        text,                 -- deep-link tab/route
-  is_read     boolean not null default false,
-  created_at  timestamptz not null default now()
-);
-create index on public.notifications (user_id, is_read);
-
-
--- ---------------------------------------------------------------------
--- 17. SITE CONFIG (admin-editable public content) + content audit
---     Single-row tables (enforced by a constant primary key) keep the
---     "settings" semantics of the app while staying relational.
--- ---------------------------------------------------------------------
-create table public.site_settings (
-  id             boolean primary key default true check (id),       -- single row
-  contact_email  citext,
-  contact_phone  text,
-  mission        text,
-  vision         text,
-  social         jsonb not null default '{}',     -- {facebook:{url,enabled}, ...}
-  branch_contacts jsonb not null default '[]',
-  homepage       jsonb not null default '{}',     -- hero copy, stats, service cards
-  login_page     jsonb not null default '{}',
-  legal          jsonb not null default '{}',     -- {privacy:{published,draft,revisions}, ...}
-  updated_at     timestamptz not null default now()
-);
-create trigger trg_site_settings_updated before update on public.site_settings
-  for each row execute function public.set_updated_at();
-
-create table public.homepage_announcement (
-  id         boolean primary key default true check (id),
-  is_enabled boolean not null default false,
-  text       text,
-  link       text,
-  updated_by text,
-  updated_at timestamptz not null default now()
-);
-
-create table public.homepage_promo (
-  id         boolean primary key default true check (id),
-  is_enabled boolean not null default false,
-  mode       promo_mode not null default 'banner',
-  theme      promo_theme not null default 'red',
-  title      text,
-  message    text,
-  cta_label  text,
-  cta_link   text,
-  updated_by text,
-  updated_at timestamptz not null default now()
-);
-
-create table public.site_audit (
-  id             uuid primary key default gen_random_uuid(),
-  section        text not null,
-  actor_id       uuid references public.profiles(id) on delete set null,
-  actor_name     text default 'Admin',
-  previous_value text,
-  new_value      text,
-  occurred_at    timestamptz not null default now()
-);
-
+CREATE INDEX idx_audit_complaint ON complaint_audit_log(complaint_id);
 
 -- =====================================================================
--- 18. ROW LEVEL SECURITY
---     This is what the current app is missing — access is enforced in
---     the database, not the browser. Policies follow ACCESS_MATRIX:
---       customer        → own records only
---       PM / SM         → own branch
---       director/admin  → org-wide
---       marketing       → org-wide aggregate, no client identity*
---     (*column masking for marketing is done via the view at the end.)
+--  5. FEEDBACK & RATINGS
 -- =====================================================================
-alter table public.branches               enable row level security;
-alter table public.profiles               enable row level security;
-alter table public.clients                enable row level security;
-alter table public.leads                  enable row level security;
-alter table public.complaints             enable row level security;
-alter table public.complaint_events       enable row level security;
-alter table public.complaint_notes        enable row level security;
-alter table public.complaint_audit        enable row level security;
-alter table public.complaint_satisfaction enable row level security;
-alter table public.improvement_feedback   enable row level security;
-alter table public.kb_articles            enable row level security;
-alter table public.questionnaires         enable row level security;
-alter table public.questionnaire_questions enable row level security;
-alter table public.questionnaire_responses enable row level security;
-alter table public.tender_broadcasts      enable row level security;
-alter table public.tender_subscribers     enable row level security;
-alter table public.careers                enable row level security;
-alter table public.job_applications       enable row level security;
-alter table public.testimonials           enable row level security;
-alter table public.announcements          enable row level security;
-alter table public.review_requests        enable row level security;
-alter table public.notifications          enable row level security;
-alter table public.site_settings          enable row level security;
-alter table public.homepage_announcement  enable row level security;
-alter table public.homepage_promo         enable row level security;
-alter table public.site_audit             enable row level security;
 
--- ---- BRANCHES: public can read active branches; only admin writes -----
-create policy branches_public_read on public.branches
-  for select to anon, authenticated using (is_active or public.is_staff());
-create policy branches_admin_write on public.branches
-  for all to authenticated
-  using (public.current_app_role() = 'admin')
-  with check (public.current_app_role() = 'admin');
+-- Star ratings / comments (client portal, public review link, survey).
+CREATE TABLE feedback (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  customer_id  BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  branch_id    BIGINT REFERENCES branches(id) ON DELETE SET NULL,
+  staff_id     BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  rating       SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment      TEXT,
+  service_type TEXT,
+  source       feedback_source NOT NULL DEFAULT 'client_portal',
+  review_token TEXT UNIQUE,                          -- for public review links
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_feedback_branch ON feedback(branch_id);
+CREATE INDEX idx_feedback_staff  ON feedback(staff_id);
 
--- ---- PROFILES ---------------------------------------------------------
-create policy profiles_self_read on public.profiles
-  for select to authenticated
-  using (id = auth.uid()
-         or public.is_org_wide()
-         or (public.current_app_role() in ('portfolio_manager','service_manager')
-             and branch_id = public.current_branch_id()));
-create policy profiles_self_update on public.profiles
-  for update to authenticated using (id = auth.uid());
-create policy profiles_admin_write on public.profiles
-  for all to authenticated
-  using (public.current_app_role() = 'admin')
-  with check (public.current_app_role() = 'admin');
-
--- ---- CLIENTS ----------------------------------------------------------
-create policy clients_read on public.clients
-  for select to authenticated
-  using (profile_id = auth.uid()
-         or public.is_org_wide()
-         or (public.current_app_role() in ('portfolio_manager','service_manager')
-             and branch_id = public.current_branch_id()));
-create policy clients_staff_write on public.clients
-  for all to authenticated
-  using (public.current_app_role() in ('portfolio_manager','service_manager','admin','director'))
-  with check (public.current_app_role() in ('portfolio_manager','service_manager','admin','director'));
-
--- ---- LEADS (branch staff + org-wide; no customer access) --------------
-create policy leads_read on public.leads
-  for select to authenticated
-  using (public.is_org_wide()
-         or (public.current_app_role() in ('portfolio_manager','service_manager')
-             and branch_id = public.current_branch_id()));
-create policy leads_write on public.leads
-  for all to authenticated
-  using (public.is_staff() and public.current_app_role() <> 'marketing')
-  with check (public.is_staff() and public.current_app_role() <> 'marketing');
-
--- ---- COMPLAINTS -------------------------------------------------------
--- Customers may file a complaint and see their own; staff see by scope.
-create policy complaints_read on public.complaints
-  for select to authenticated
-  using (
-    public.current_app_role() in ('director','admin','marketing')
-    or (public.current_app_role() in ('portfolio_manager','service_manager')
-        and branch_id = public.current_branch_id())
-    or client_id in (select id from public.clients where profile_id = auth.uid())
-  );
-create policy complaints_customer_insert on public.complaints
-  for insert to authenticated
-  with check (
-    client_id in (select id from public.clients where profile_id = auth.uid())
-    or public.is_staff()
-  );
--- anonymous public complaints (no login) — allow anon insert of anonymous rows
-create policy complaints_anon_insert on public.complaints
-  for insert to anon
-  with check (anonymous = true);
-create policy complaints_staff_update on public.complaints
-  for update to authenticated
-  using (
-    public.current_app_role() in ('director','admin')
-    or (public.current_app_role() in ('portfolio_manager','service_manager')
-        and branch_id = public.current_branch_id())
-  );
-
--- Child tables inherit visibility from the parent complaint.
-create policy comp_events_read on public.complaint_events
-  for select to authenticated using (
-    exists (select 1 from public.complaints c where c.id = complaint_id));   -- parent RLS already filters
-create policy comp_events_write on public.complaint_events
-  for insert to authenticated with check (public.is_staff());
-
--- Internal notes: staff only. Customer notes: visible to the owning client too.
-create policy comp_notes_read on public.complaint_notes
-  for select to authenticated using (
-    public.is_staff()
-    or (audience = 'customer'
-        and complaint_id in (
-          select id from public.complaints
-          where client_id in (select id from public.clients where profile_id = auth.uid())))
-  );
-create policy comp_notes_write on public.complaint_notes
-  for insert to authenticated with check (public.is_staff());
-
-create policy comp_audit_read on public.complaint_audit
-  for select to authenticated using (public.is_staff());
-create policy comp_audit_write on public.complaint_audit
-  for insert to authenticated with check (public.is_staff());
-
-create policy comp_sat_rw on public.complaint_satisfaction
-  for all to authenticated
-  using (
-    public.is_staff()
-    or complaint_id in (
-      select id from public.complaints
-      where client_id in (select id from public.clients where profile_id = auth.uid())))
-  with check (
-    public.is_staff()
-    or complaint_id in (
-      select id from public.complaints
-      where client_id in (select id from public.clients where profile_id = auth.uid())));
-
--- ---- IMPROVEMENT FEEDBACK (anyone can submit; staff read by scope) ----
-create policy feedback_insert_any on public.improvement_feedback
-  for insert to anon, authenticated with check (true);
-create policy feedback_read on public.improvement_feedback
-  for select to authenticated
-  using (public.is_org_wide()
-         or (public.is_staff() and branch_id = public.current_branch_id()));
-
--- ---- KNOWLEDGE BASE (staff read; admin/director write) ----------------
-create policy kb_read on public.kb_articles
-  for select to authenticated using (public.is_staff());
-create policy kb_write on public.kb_articles
-  for all to authenticated
-  using (public.current_app_role() in ('admin','director'))
-  with check (public.current_app_role() in ('admin','director'));
-
--- ---- QUESTIONNAIRES (public sees published; marketing manages) --------
-create policy qn_public_read on public.questionnaires
-  for select to anon, authenticated
-  using (status = 'published' or public.current_app_role() in ('marketing','admin','director'));
-create policy qn_manage on public.questionnaires
-  for all to authenticated
-  using (public.current_app_role() in ('marketing','admin'))
-  with check (public.current_app_role() in ('marketing','admin'));
-create policy qn_q_public_read on public.questionnaire_questions
-  for select to anon, authenticated using (true);
-create policy qn_q_manage on public.questionnaire_questions
-  for all to authenticated
-  using (public.current_app_role() in ('marketing','admin'))
-  with check (public.current_app_role() in ('marketing','admin'));
-create policy qn_resp_insert on public.questionnaire_responses
-  for insert to anon, authenticated with check (true);
-create policy qn_resp_read on public.questionnaire_responses
-  for select to authenticated
-  using (public.current_app_role() in ('marketing','admin','director'));
-
--- ---- TENDERS (public reads the public ones; marketing manages) --------
-create policy tenders_public_read on public.tender_broadcasts
-  for select to anon, authenticated
-  using (is_public or public.current_app_role() in ('marketing','admin','director'));
-create policy tenders_manage on public.tender_broadcasts
-  for all to authenticated
-  using (public.current_app_role() in ('marketing','admin'))
-  with check (public.current_app_role() in ('marketing','admin'));
-create policy tender_sub_insert on public.tender_subscribers
-  for insert to anon, authenticated with check (true);
-create policy tender_sub_read on public.tender_subscribers
-  for select to authenticated
-  using (public.current_app_role() in ('marketing','admin'));
-
--- ---- CAREERS (public sees active; marketing/admin manage) -------------
-create policy careers_public_read on public.careers
-  for select to anon, authenticated
-  using (is_active or public.current_app_role() in ('marketing','admin'));
-create policy careers_manage on public.careers
-  for all to authenticated
-  using (public.current_app_role() in ('marketing','admin'))
-  with check (public.current_app_role() in ('marketing','admin'));
-
--- ---- JOB APPLICATIONS (public submits; staff review) ------------------
-create policy applications_insert_any on public.job_applications
-  for insert to anon, authenticated with check (true);
-create policy applications_read on public.job_applications
-  for select to authenticated
-  using (public.current_app_role() in ('marketing','admin','service_manager','director'));
-create policy applications_update on public.job_applications
-  for update to authenticated
-  using (public.current_app_role() in ('marketing','admin','service_manager','director'));
-
--- ---- TESTIMONIALS (public sees enabled; marketing manages) ------------
-create policy testimonials_public_read on public.testimonials
-  for select to anon, authenticated
-  using (is_enabled or public.current_app_role() in ('marketing','admin'));
-create policy testimonials_manage on public.testimonials
-  for all to authenticated
-  using (public.current_app_role() in ('marketing','admin'))
-  with check (public.current_app_role() in ('marketing','admin'));
-
--- ---- ANNOUNCEMENTS (targeted to the caller's role) --------------------
-create policy announcements_read on public.announcements
-  for select to authenticated
-  using (
-    public.current_app_role() in ('director','admin')
-    or (status = 'published' and public.current_app_role() = any (target_roles))
-  );
-create policy announcements_manage on public.announcements
-  for all to authenticated
-  using (public.current_app_role() in ('director','admin'))
-  with check (public.current_app_role() in ('director','admin'));
-
--- ---- REVIEW REQUESTS (staff only) -------------------------------------
-create policy reviews_staff on public.review_requests
-  for all to authenticated using (public.is_staff()) with check (public.is_staff());
-
--- ---- NOTIFICATIONS (each user sees only their own) --------------------
-create policy notifications_own on public.notifications
-  for select to authenticated using (user_id = auth.uid());
-create policy notifications_own_update on public.notifications
-  for update to authenticated using (user_id = auth.uid());
-create policy notifications_insert on public.notifications
-  for insert to authenticated with check (public.is_staff() or user_id = auth.uid());
-
--- ---- SITE CONFIG (public reads; admin writes; director/marketing for
---      their respective homepage widgets) --------------------------------
-create policy site_settings_read on public.site_settings
-  for select to anon, authenticated using (true);
-create policy site_settings_admin on public.site_settings
-  for all to authenticated
-  using (public.current_app_role() = 'admin')
-  with check (public.current_app_role() = 'admin');
-
-create policy hp_ann_read on public.homepage_announcement
-  for select to anon, authenticated using (true);
-create policy hp_ann_write on public.homepage_announcement
-  for all to authenticated
-  using (public.current_app_role() in ('director','admin'))
-  with check (public.current_app_role() in ('director','admin'));
-
-create policy hp_promo_read on public.homepage_promo
-  for select to anon, authenticated using (true);
-create policy hp_promo_write on public.homepage_promo
-  for all to authenticated
-  using (public.current_app_role() in ('marketing','admin'))
-  with check (public.current_app_role() in ('marketing','admin'));
-
-create policy site_audit_read on public.site_audit
-  for select to authenticated using (public.current_app_role() in ('admin','director'));
-create policy site_audit_insert on public.site_audit
-  for insert to authenticated with check (public.is_staff());
-
+-- "How can we improve?" submissions (IMPROVEMENT_FEEDBACK).
+CREATE TABLE improvement_feedback (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  category     TEXT NOT NULL,                         -- IMPROVEMENT_CATEGORIES
+  body         TEXT NOT NULL,
+  author_name  TEXT,                                  -- 'Anonymous' allowed
+  is_anonymous BOOLEAN NOT NULL DEFAULT FALSE,
+  branch_id    BIGINT REFERENCES branches(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- =====================================================================
--- 19. MARKETING VIEW — complaints WITHOUT client identity (§23)
---     Marketing has national visibility but must not see who complained.
---     Query this view from the marketing dashboard instead of the table.
+--  6. LEADS  (potential clients)
 -- =====================================================================
-create or replace view public.complaints_marketing
-with (security_invoker = true) as
-  select id, ticket, branch_id, journey_stage, category, severity, priority,
-         sentiment, status, created_at, resolved_at, closed_at,
-         root_cause_group, root_cause
-  from public.complaints;
-grant select on public.complaints_marketing to authenticated;
-
-
--- =====================================================================
--- 20. STORAGE BUCKETS (run in Supabase; private — never public)
---     CVs and complaint voice notes contain PII and must stay private,
---     accessed only via signed URLs generated server-side.
--- =====================================================================
-insert into storage.buckets (id, name, public)
-values ('cvs', 'cvs', false), ('voice-notes', 'voice-notes', false)
-on conflict (id) do nothing;
-
--- Staff may read CVs; anyone may upload an application CV.
-create policy "cv upload" on storage.objects
-  for insert to anon, authenticated
-  with check (bucket_id = 'cvs');
-create policy "cv read staff" on storage.objects
-  for select to authenticated
-  using (bucket_id = 'cvs' and public.is_staff());
-
--- Voice notes: uploaded with a complaint, read by staff.
-create policy "voice upload" on storage.objects
-  for insert to anon, authenticated
-  with check (bucket_id = 'voice-notes');
-create policy "voice read staff" on storage.objects
-  for select to authenticated
-  using (bucket_id = 'voice-notes' and public.is_staff());
-
+CREATE TABLE leads (
+  id                   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name                 TEXT NOT NULL,
+  phone                TEXT NOT NULL,
+  branch_id            BIGINT REFERENCES branches(id) ON DELETE SET NULL,
+  referral_source_id   BIGINT REFERENCES referral_sources(id) ON DELETE SET NULL,
+  referral_source_text TEXT,                          -- snapshot / free-text source
+  product              TEXT,
+  status               lead_status NOT NULL DEFAULT 'New',
+  notes                TEXT,
+  added_by_user_id     BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  added_by_name        TEXT,
+  converted_user_id    BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_leads_updated BEFORE UPDATE ON leads
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX idx_leads_status ON leads(status);
+CREATE INDEX idx_leads_branch ON leads(branch_id);
+-- De-duplication helper: normalised phone digits should be unique.
+CREATE UNIQUE INDEX uq_leads_phone_digits
+  ON leads ((regexp_replace(phone, '\D', '', 'g')));
 
 -- =====================================================================
--- 21. SEED NOTES
---   • Insert the five branches first (Gaborone, Francistown, Maun,
---     Palapye, Selebi-Phikwe) so FKs resolve, then create the singleton
---     config rows:
---         insert into public.site_settings (id) values (true);
---         insert into public.homepage_announcement (id) values (true);
---         insert into public.homepage_promo (id) values (true);
---   • Staff accounts are created via Supabase Auth; their profile row is
---     created automatically by handle_new_user(), then an admin sets the
---     correct role/branch_id.
---   • client_code (TIC-000001) and ticket (TCN-0001) are generated — never
---     write them directly.
+--  6b. CLIENT PORTFOLIO  (Portfolio Manager CRM for PO financing clients)
+--  Tracks how many times a PM has assisted each client with PO financing
+--  facilitation, plus independent contact/retention tracking. Distinct
+--  from client_profiles (registered platform customers) — a portfolio
+--  client is a company/contact a PM has worked with, which may or may
+--  not also have a platform login. Read access is also exposed to
+--  Service Manager and Director for oversight (org-wide, all PMs).
+-- =====================================================================
+CREATE TABLE portfolio_clients (
+  id                     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  client_code            TEXT GENERATED ALWAYS AS ('TIC-' || lpad(id::text, 6, '0')) STORED,
+  company_name           TEXT NOT NULL,
+  reg_number             TEXT,
+  contact_person         TEXT,
+  phone                  TEXT,
+  email                  CITEXT,
+  branch_id              BIGINT REFERENCES branches(id) ON DELETE SET NULL,
+  industry               TEXT,
+  pm_id                  BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  -- Contact / retention tracking — independent of assistance records.
+  last_contact_date      DATE,
+  next_follow_up_date    DATE,
+  contact_status_notes   TEXT,
+  preferred_contact_method contact_method NOT NULL DEFAULT 'Phone',
+  notes                  TEXT,
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_portfolio_clients_updated BEFORE UPDATE ON portfolio_clients
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX idx_portfolio_clients_pm       ON portfolio_clients(pm_id);
+CREATE INDEX idx_portfolio_clients_branch   ON portfolio_clients(branch_id);
+CREATE INDEX idx_portfolio_clients_lastcontact ON portfolio_clients(last_contact_date);
+-- De-duplication helpers used by the Excel import flow (client_code takes
+-- priority in application logic; reg number / phone / email are fallbacks).
+CREATE UNIQUE INDEX uq_portfolio_clients_reg ON portfolio_clients(reg_number) WHERE reg_number IS NOT NULL;
+
+-- Manually logged PO financing facilitation events — never auto-created.
+-- A client's "times assisted" count is always COUNT(*) of these rows,
+-- never a stored/editable column.
+CREATE TABLE assistance_records (
+  id                   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  portfolio_client_id  BIGINT NOT NULL REFERENCES portfolio_clients(id) ON DELETE CASCADE,
+  assistance_date      DATE NOT NULL DEFAULT current_date,
+  po_number            TEXT,
+  buyer_name           TEXT,
+  goods_description    TEXT,
+  po_value             NUMERIC(14,2) NOT NULL DEFAULT 0,
+  amount_financed      NUMERIC(14,2) NOT NULL DEFAULT 0,
+  client_contribution  NUMERIC(14,2) NOT NULL DEFAULT 0,
+  industry             TEXT,
+  funding_institution  TEXT,
+  branch_id            BIGINT REFERENCES branches(id) ON DELETE SET NULL,
+  status               assistance_status NOT NULL DEFAULT 'Funded',
+  notes                TEXT,
+  attachment_urls      TEXT[] NOT NULL DEFAULT '{}',    -- PO, invoice, contract, delivery docs
+  pm_id                BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_assistance_records_updated BEFORE UPDATE ON assistance_records
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX idx_assistance_client ON assistance_records(portfolio_client_id);
+CREATE INDEX idx_assistance_date   ON assistance_records(assistance_date);
+CREATE INDEX idx_assistance_status ON assistance_records(status);
+
+-- =====================================================================
+--  7. QUESTIONNAIRES / SURVEYS  (Marketing)
+-- =====================================================================
+CREATE TABLE questionnaires (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title       TEXT NOT NULL,
+  description TEXT,
+  status      content_status NOT NULL DEFAULT 'draft',
+  author      TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_questionnaires_updated BEFORE UPDATE ON questionnaires
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE questionnaire_questions (
+  id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  questionnaire_id BIGINT NOT NULL REFERENCES questionnaires(id) ON DELETE CASCADE,
+  question_key     TEXT NOT NULL,                     -- 'q1','q2' within a questionnaire
+  type             question_type NOT NULL,
+  text             TEXT NOT NULL,
+  options          TEXT[],                            -- for type='choice'
+  sort_order       INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (questionnaire_id, question_key)
+);
+
+CREATE TABLE questionnaire_responses (
+  id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  questionnaire_id BIGINT NOT NULL REFERENCES questionnaires(id) ON DELETE CASCADE,
+  client_id        BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  client_name      TEXT,                              -- snapshot
+  submitted_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (questionnaire_id, client_id)                -- one response per client
+);
+
+CREATE TABLE questionnaire_answers (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  response_id BIGINT NOT NULL REFERENCES questionnaire_responses(id) ON DELETE CASCADE,
+  question_id BIGINT NOT NULL REFERENCES questionnaire_questions(id) ON DELETE CASCADE,
+  answer      TEXT,                                   -- rating stored as text/number
+  UNIQUE (response_id, question_id)
+);
+
+-- =====================================================================
+--  8. MARKETING: tenders, subscribers, blog, testimonials
+-- =====================================================================
+
+-- Tender / opportunity broadcasts to filtered client segments.
+CREATE TABLE tender_broadcasts (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title           TEXT NOT NULL,
+  body            TEXT NOT NULL,
+  channels        TEXT[] NOT NULL DEFAULT '{dashboard}',  -- dashboard|email|whatsapp
+  filter_branch   TEXT NOT NULL DEFAULT 'All',
+  filter_client_type TEXT NOT NULL DEFAULT 'All',
+  filter_industry TEXT NOT NULL DEFAULT 'All',
+  filter_status   TEXT NOT NULL DEFAULT 'All',
+  recipient_count INTEGER NOT NULL DEFAULT 0,
+  sent_by         TEXT,
+  sent_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_tender_broadcasts_sent ON tender_broadcasts(sent_at DESC);
+
+-- Public tender-alert opt-in list (login page, registration, profile).
+-- user_id is NULL for visitors who subscribed without an account.
+CREATE TABLE tender_subscribers (
+  id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  email          CITEXT NOT NULL UNIQUE,
+  phone          TEXT,
+  user_id        BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  subscribed_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  unsubscribed_at TIMESTAMPTZ                         -- NULL = currently subscribed
+);
+CREATE INDEX idx_tender_subscribers_active
+  ON tender_subscribers(email) WHERE unsubscribed_at IS NULL;
+
+-- Blog posts / announcements shown on the public homepage.
+CREATE TABLE blog_posts (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title        TEXT NOT NULL,
+  excerpt      TEXT NOT NULL,
+  content      TEXT,
+  category     TEXT,                                  -- News|Education|Announcement|Promotion|Update
+  author       TEXT,
+  status       content_status NOT NULL DEFAULT 'published',
+  pinned       BOOLEAN NOT NULL DEFAULT FALSE,
+  image_url    TEXT,
+  scheduled_for DATE,                                 -- hidden until this date
+  published_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_blog_posts_updated BEFORE UPDATE ON blog_posts
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX idx_blog_status ON blog_posts(status);
+
+-- Customer testimonials (homepage).
+CREATE TABLE testimonials (
+  id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name       TEXT NOT NULL,
+  company    TEXT,
+  rating     SMALLINT CHECK (rating BETWEEN 1 AND 5),
+  comment    TEXT NOT NULL,
+  branch_id  BIGINT REFERENCES branches(id) ON DELETE SET NULL,
+  enabled    BOOLEAN NOT NULL DEFAULT TRUE,
+  -- 'manual': added directly by Marketing (e.g. a quote sent by WhatsApp/SMS).
+  -- 'survey': auto-picked from a 5-star complaint_satisfaction response.
+  source              testimonial_source NOT NULL DEFAULT 'manual',
+  source_complaint_id BIGINT REFERENCES complaints(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- A given 5-star survey response should only ever generate one testimonial.
+CREATE UNIQUE INDEX uq_testimonials_source_complaint
+  ON testimonials(source_complaint_id) WHERE source_complaint_id IS NOT NULL;
+
+-- =====================================================================
+--  9. CAREERS
+-- =====================================================================
+CREATE TABLE careers (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title        TEXT NOT NULL,
+  type         career_type NOT NULL DEFAULT 'Full-time',
+  location     TEXT,
+  department   TEXT,
+  description  TEXT NOT NULL,
+  requirements TEXT,
+  closing_date DATE,
+  is_active    BOOLEAN NOT NULL DEFAULT TRUE,         -- published vs hidden
+  published_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_careers_updated BEFORE UPDATE ON careers
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE job_applications (
+  id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  career_id      BIGINT REFERENCES careers(id) ON DELETE SET NULL,
+  position       TEXT NOT NULL,                       -- snapshot of role title
+  applicant_name TEXT NOT NULL,
+  email          CITEXT NOT NULL,
+  phone          TEXT,
+  cover_note     TEXT,
+  cv_file_name   TEXT,
+  cv_mime_type   TEXT,
+  cv_size_bytes  INTEGER,
+  cv_url         TEXT,                                -- object-storage key/URL (not a data URL)
+  status         application_status NOT NULL DEFAULT 'New',
+  applied_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_applications_career ON job_applications(career_id);
+CREATE INDEX idx_applications_status ON job_applications(status);
+
+-- =====================================================================
+--  10. CONTENT, CONFIG & OPS
+-- =====================================================================
+
+-- Staff announcements with role targeting (ANNOUNCEMENTS).
+CREATE TABLE announcements (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title       TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  author      TEXT,
+  author_role user_role,
+  priority    announcement_priority NOT NULL DEFAULT 'normal',
+  status      content_status NOT NULL DEFAULT 'published',
+  pinned      BOOLEAN NOT NULL DEFAULT FALSE,
+  start_date  DATE,
+  end_date    DATE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Which roles each announcement targets (announcement.targetRoles[]).
+CREATE TABLE announcement_targets (
+  announcement_id BIGINT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+  role            user_role NOT NULL,
+  PRIMARY KEY (announcement_id, role)
+);
+
+-- In-app notification feed (NotificationContext). link_tab deep-links a dashboard tab.
+CREATE TABLE notifications (
+  id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id    BIGINT REFERENCES users(id) ON DELETE CASCADE,
+  audience_role user_role,                            -- role-wide notifications
+  type       TEXT NOT NULL,                           -- complaint|escalation|lead|report|system|...
+  title      TEXT NOT NULL,
+  body       TEXT,
+  link_tab   TEXT,                                    -- deep-link target tab
+  is_read    BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_notifications_user ON notifications(user_id, is_read);
+
+-- Knowledge base articles (KB_ARTICLES).
+CREATE TABLE kb_articles (
+  id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  category   TEXT NOT NULL,
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  author     TEXT,
+  archived   BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_kb_updated BEFORE UPDATE ON kb_articles
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- WhatsApp message templates, scoped by role (WA_TEMPLATES_BY_ROLE).
+CREATE TABLE wa_templates (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  role         user_role NOT NULL,
+  name         TEXT NOT NULL,
+  template_key TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  variables    TEXT[] NOT NULL DEFAULT '{}',
+  is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (role, template_key)
+);
+CREATE TRIGGER trg_wa_templates_updated BEFORE UPDATE ON wa_templates
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Admin-editable site settings (SITE_SETTINGS) as namespaced JSON blobs:
+-- keys like 'contact','social','homepage','login_page','mission_vision'.
+CREATE TABLE site_settings (
+  key        TEXT PRIMARY KEY,
+  value      JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_by TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Director homepage announcement banner (HOMEPAGE_ANNOUNCEMENT) — latest row wins.
+CREATE TABLE homepage_announcements (
+  id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  enabled    BOOLEAN NOT NULL DEFAULT FALSE,
+  title      TEXT,
+  message    TEXT,
+  updated_by TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Marketing homepage promo banner/popup (HOMEPAGE_PROMO) — latest row wins.
+CREATE TABLE homepage_promos (
+  id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  enabled    BOOLEAN NOT NULL DEFAULT FALSE,
+  mode       promo_mode NOT NULL DEFAULT 'banner',
+  title      TEXT,
+  message    TEXT,
+  cta_label  TEXT,
+  cta_link   TEXT,
+  theme      promo_theme NOT NULL DEFAULT 'red',
+  image_url  TEXT,          -- uploaded flyer/photo (Supabase Storage URL)
+  updated_by TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Legal documents with draft/publish workflow + revision history.
+CREATE TABLE legal_documents (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  doc_type     legal_doc_type NOT NULL UNIQUE,
+  title        TEXT NOT NULL,
+  content      TEXT,
+  status       content_status NOT NULL DEFAULT 'draft',
+  version      INTEGER NOT NULL DEFAULT 1,
+  published_at TIMESTAMPTZ,
+  updated_by   TEXT,
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_legal_updated BEFORE UPDATE ON legal_documents
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE legal_document_revisions (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  document_id BIGINT NOT NULL REFERENCES legal_documents(id) ON DELETE CASCADE,
+  version     INTEGER NOT NULL,
+  content     TEXT,
+  status      content_status NOT NULL,
+  changed_by  TEXT,
+  changed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Audit trail for site/legal settings changes (SITE_AUDIT).
+CREATE TABLE site_audit_log (
+  id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  area           TEXT NOT NULL,                       -- 'site_settings','legal','promo',...
+  field          TEXT,
+  previous_value TEXT,
+  new_value      TEXT,
+  changed_by     TEXT,
+  changed_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- General system-wide activity feed (Admin › Audit Logs). Every module —
+-- auth, user management, branches, content, client portfolio, marketing,
+-- complaints — feeds into this single table so Admin can see real system
+-- activity across the whole platform, filterable by module. Complaint and
+-- content changes are also captured in their own detail tables above
+-- (complaint_audit_log, site_audit_log); this table is the merged,
+-- module-tagged view shown in the Admin dashboard.
+CREATE TABLE system_audit_log (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  module       TEXT NOT NULL,        -- 'Security','User Management','Branches','Content','Complaints','Client Portfolio','Marketing'
+  action       TEXT NOT NULL,
+  performed_by TEXT NOT NULL DEFAULT 'system',
+  details      TEXT,
+  occurred_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_system_audit_module ON system_audit_log(module);
+CREATE INDEX idx_system_audit_time   ON system_audit_log(occurred_at DESC);
+
+-- =====================================================================
+--  11. CONVENIENCE VIEWS
+-- =====================================================================
+
+-- All currently open complaints (non-terminal statuses) with days-open.
+CREATE VIEW v_open_complaints AS
+SELECT c.*,
+       EXTRACT(DAY FROM now() - c.created_at)::int AS days_open
+FROM complaints c
+WHERE c.status NOT IN ('resolved','closed');
+
+-- Per-branch complaint summary for dashboards.
+CREATE VIEW v_branch_complaint_summary AS
+SELECT b.id AS branch_id,
+       b.name AS branch,
+       count(c.id)                                         AS total_complaints,
+       count(c.id) FILTER (WHERE c.status NOT IN ('resolved','closed')) AS open_complaints,
+       count(c.id) FILTER (WHERE c.status = 'escalated')   AS escalated,
+       count(c.id) FILTER (WHERE c.status = 'closed')      AS closed
+FROM branches b
+LEFT JOIN complaints c ON c.branch_id = b.id
+GROUP BY b.id, b.name;
+
+-- =====================================================================
+--  12. SEED REFERENCE DATA  (branches, categories, referral sources)
+-- =====================================================================
+INSERT INTO branches (name, city, country) VALUES
+  ('Gaborone','Gaborone','Botswana'),
+  ('Francistown','Francistown','Botswana'),
+  ('Maun','Maun','Botswana'),
+  ('Palapye','Palapye','Botswana'),
+  ('Phikwe','Selebi-Phikwe','Botswana'),
+  ('Head Office','Gaborone','Botswana');
+
+INSERT INTO referral_sources (name) VALUES
+  ('Facebook'),('WhatsApp'),('Google Search'),('Friend or Family Referral'),
+  ('Walk-in'),('Radio / Newspaper'),('CEDA Referral'),
+  ('Business Partner Referral'),('Existing Customer Referral'),('Other');
+
+INSERT INTO complaint_categories (journey_stage, name) VALUES
+  ('before_applying','Poor service'),
+  ('before_applying','Information not provided'),
+  ('before_applying','Delayed response'),
+  ('before_applying','Difficulty contacting staff'),
+  ('before_applying','Other'),
+  ('during_application','Application delays'),
+  ('during_application','Missing feedback'),
+  ('during_application','Staff conduct'),
+  ('during_application','Documentation issues'),
+  ('during_application','Other'),
+  ('after_disbursement','Follow-up service'),
+  ('after_disbursement','Payment issues'),
+  ('after_disbursement','Interest Issues'),
+  ('after_disbursement','Customer support issues'),
+  ('after_disbursement','Incorrect information'),
+  ('after_disbursement','Other');
+
+COMMIT;
+
+-- =====================================================================
+--  END OF SCHEMA
+--  Next steps:
+--   1. Decide on auth approach (custom users table above vs Supabase
+--      Auth) — see the note at the top of this file.
+--   2. Layer Row-Level Security (RLS) policies so a Service Manager only
+--      sees their branch, a PM only their assigned complaints and
+--      portfolio clients, and clients only their own records — mirroring
+--      the app's role scopes.
+--   3. Create a Storage bucket (e.g. "public-media") for the homepage
+--      promo flyer image and any complaint/assistance attachments, and
+--      point homepage_promos.image_url / assistance_records.attachment_urls
+--      at it instead of storing base64 blobs in the database.
 -- =====================================================================

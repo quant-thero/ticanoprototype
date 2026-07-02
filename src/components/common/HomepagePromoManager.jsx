@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Megaphone, Save, Monitor, Square, ArrowRight, X } from 'lucide-react';
+import { Megaphone, Save, Monitor, Square, ArrowRight, X, Image as ImageIcon, Upload, Trash2 } from 'lucide-react';
 import { getHomepagePromo, setHomepagePromo } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -19,8 +19,20 @@ export default function HomepagePromoManager() {
   if (!p) return <div className="flex justify-center py-10"><div className="w-8 h-8 border-2 border-gray-200 border-t-ticano-red rounded-full animate-spin" /></div>;
 
   const set = (patch) => setP((prev) => ({ ...prev, ...patch }));
+
+  const onImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return toast.error('Please choose an image file');
+    if (file.size > 3 * 1024 * 1024) return toast.error('Image must be under 3MB');
+    const reader = new FileReader();
+    reader.onload = () => set({ image: reader.result });
+    reader.readAsDataURL(file);
+  };
+  const removeImage = () => set({ image: null });
+
   const save = async () => {
-    if (!p.title.trim() || !p.message.trim()) return toast.error('Add a title and message');
+    if (!p.image && (!p.title.trim() || !p.message.trim())) return toast.error('Add a title and message, or upload a flyer image');
     setSaving(true);
     const { data } = await setHomepagePromo(p, user?.name || 'Marketing');
     setP(data.promo);
@@ -36,7 +48,7 @@ export default function HomepagePromoManager() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h3 className="text-lg font-bold text-ticano-charcoal dark:text-white flex items-center gap-2"><Megaphone size={18} /> Homepage Promotion</h3>
-          <p className="text-sm text-gray-500 mt-0.5">Publish a promotional banner or pop-up to the public homepage.</p>
+          <p className="text-sm text-gray-500 mt-0.5">Publish a promotional banner or pop-up to the public homepage. Upload a flyer image, or use a title, message and picture.</p>
         </div>
         <button onClick={() => set({ enabled: !p.enabled })}
           className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${p.enabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700'}`}>
@@ -52,6 +64,21 @@ export default function HomepagePromoManager() {
               <button onClick={() => set({ mode: 'banner' })} className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm border ${p.mode === 'banner' ? 'bg-ticano-red text-white border-ticano-red' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300'}`}><Monitor size={14} /> Top banner</button>
               <button onClick={() => set({ mode: 'popup' })} className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm border ${p.mode === 'popup' ? 'bg-ticano-red text-white border-ticano-red' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300'}`}><Square size={14} /> Pop-up</button>
             </div>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Flyer / picture (optional)</p>
+            {p.image ? (
+              <div className="relative w-full max-w-xs">
+                <img src={p.image} alt="Promo flyer" className="w-full rounded-xl border border-gray-200 dark:border-gray-600 object-cover max-h-48" />
+                <button onClick={removeImage} title="Remove image" className="absolute top-2 right-2 p-1.5 bg-black/60 text-white rounded-lg hover:bg-black/80"><Trash2 size={13} /></button>
+              </div>
+            ) : (
+              <label className="flex items-center gap-2 px-4 py-3 border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-xl text-sm text-gray-500 dark:text-gray-400 cursor-pointer hover:border-ticano-red hover:text-ticano-red transition-colors w-fit">
+                <Upload size={15} /> Upload a photo or flyer
+                <input type="file" accept="image/*" onChange={onImageChange} className="hidden" />
+              </label>
+            )}
+            <p className="text-[11px] text-gray-400 mt-1">You can upload a ready-made flyer (e.g. a pop-up poster) instead of, or alongside, the title and message below.</p>
           </div>
           <div><label className="text-xs text-gray-500 mb-1 block">Title</label><input className={inp} value={p.title} onChange={(e) => set({ title: e.target.value })} placeholder="Promotion title" /></div>
           <div><label className="text-xs text-gray-500 mb-1 block">Message</label><textarea rows={3} className={inp + ' resize-none'} value={p.message} onChange={(e) => set({ message: e.target.value })} placeholder="Promotion message" /></div>
@@ -78,6 +105,7 @@ export default function HomepagePromoManager() {
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Preview {!p.enabled && <span className="normal-case text-amber-600">· currently hidden</span>}</p>
           {p.mode === 'banner' ? (
             <div className={`rounded-xl px-4 py-2.5 flex items-center justify-center gap-3 text-center text-sm ${themeCls}`}>
+              {p.image && <img src={p.image} alt="" className="w-7 h-7 rounded object-cover shrink-0" />}
               <span className="font-semibold">{p.title}</span>
               <span className="hidden sm:inline opacity-90">{p.message}</span>
               {p.ctaLabel && <span className="shrink-0 px-3 py-1 rounded-lg bg-white/20 font-semibold">{p.ctaLabel}</span>}
@@ -85,11 +113,13 @@ export default function HomepagePromoManager() {
             </div>
           ) : (
             <div className="border border-gray-100 dark:border-gray-700 rounded-2xl overflow-hidden max-w-sm mx-auto">
-              <div className="bg-ticano-red h-2" />
+              {p.image ? (
+                <img src={p.image} alt="Promo flyer" className="w-full max-h-64 object-cover" />
+              ) : <div className="bg-ticano-red h-2" />}
               <div className="p-6 text-center">
-                <div className="w-12 h-12 rounded-2xl bg-ticano-red/10 text-ticano-red flex items-center justify-center mx-auto mb-3"><Megaphone size={22} /></div>
-                <h3 className="text-xl font-black text-ticano-charcoal dark:text-white mb-2">{p.title}</h3>
-                <p className="text-gray-600 dark:text-gray-300 text-sm leading-relaxed mb-5">{p.message}</p>
+                {!p.image && <div className="w-12 h-12 rounded-2xl bg-ticano-red/10 text-ticano-red flex items-center justify-center mx-auto mb-3"><Megaphone size={22} /></div>}
+                {p.title && <h3 className="text-xl font-black text-ticano-charcoal dark:text-white mb-2">{p.title}</h3>}
+                {p.message && <p className="text-gray-600 dark:text-gray-300 text-sm leading-relaxed mb-5">{p.message}</p>}
                 {p.ctaLabel && <span className="inline-flex items-center gap-2 px-6 py-3 bg-ticano-red text-white rounded-xl font-bold">{p.ctaLabel} <ArrowRight size={16} /></span>}
               </div>
             </div>

@@ -109,7 +109,7 @@ export default function WhatsAppSimulator({ clientName = 'Stacey Nthoi', clientP
     const newMsg = { id: Date.now(), from: 'pm', text: preview, time: formatTime(), read: false };
     setMessages((prev) => [...prev, newMsg]);
     setSent((prev) => [...prev, { ...newMsg, template: selectedTpl?.name, sentAt: new Date().toISOString() }]);
-    toast.success(`WhatsApp message sent to ${activeName} ✓`);
+    toast.success(`WhatsApp message sent to ${activeName}`);
     setSelectedTpl(null); setVariables({}); setPreview('');
     setSending(false);
   };

@@ -5,6 +5,7 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, R
 import Navbar from '../components/common/Navbar';
 import { StatCard, Badge, LoadingSpinner, Card, EmptyState, AnalyticsLauncher, AnalyticsBackBar } from '../components/common/UI';
 import LeadsModule from '../components/common/LeadsModule';
+import ClientPortfolio from '../components/common/ClientPortfolio';
 import ReviewLinkSender from '../components/common/ReviewLinkSender';
 import ComplaintsModule from '../components/common/ComplaintsModule';
 import KnowledgeBase from '../components/common/KnowledgeBase';
@@ -27,7 +28,7 @@ import { formatPercent, formatDate, formatDateTime } from '../utils/format';
 import { CLIENT_TYPE_LABEL, JOURNEY_STAGE_LABEL, complaintStatusLabel, OPEN_COMPLAINT_STATUSES } from '../utils/constants';
 import toast from 'react-hot-toast';
 
-const TABS = ['Overview', 'Complaints', 'Aging', 'Escalations', 'Improvement Feedback', 'Knowledge Base', 'Leads', 'Applications', 'Unassigned', 'Analytics', 'Reports', 'WhatsApp', 'Email'];
+const TABS = ['Overview', 'Complaints', 'Aging', 'Escalations', 'Improvement Feedback', 'Knowledge Base', 'Leads', 'Client Portfolio', 'Applications', 'Unassigned', 'Analytics', 'Reports', 'WhatsApp', 'Email'];
 // Analytics views consolidated under the single "Analytics" tab.
 const SM_ANALYTICS_VIEWS = [
   { id: 'Active Clients',     label: 'Active Clients',     desc: 'New vs existing client mix & retention', icon: UserPlus2,   accent: 'red' },
@@ -284,6 +285,8 @@ export default function ServiceManagerDashboard() {
 
         {/* ---------- LEADS ---------- */}
         {activeTab === 'Leads' && <LeadsModule />}
+
+        {activeTab === 'Client Portfolio' && <ClientPortfolio mode="orgwide" />}
 
         {/* ---------- UNASSIGNED CUSTOMERS ---------- */}
         {activeTab === 'Unassigned' && (

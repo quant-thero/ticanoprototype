@@ -4,7 +4,7 @@ import { Users, GitBranch, Settings, Database, FileText, Activity, Plus, Trash2,
 import Navbar from '../components/common/Navbar';
 import { Badge, SearchFilters, ExportButton, LoadingSpinner, Modal } from '../components/common/UI';
 import KnowledgeBase from '../components/common/KnowledgeBase';
-import { getUsers, createUser, updateUser, deleteUser, adminResetUserPassword, triggerBackup, getAuditTrail, getBranches, createBranch, updateBranch, getWaTemplates, getAllWaTemplates, createWaTemplate, updateWaTemplate, deleteWaTemplate, setWaTemplateActive, WA_TEMPLATE_ROLES, getSiteSettings, updateSiteSettings, getSiteAudit } from '../services/api';
+import { getUsers, createUser, updateUser, deleteUser, adminResetUserPassword, triggerBackup, getSystemAuditTrail, SYSTEM_AUDIT_MODULES, getBranches, createBranch, updateBranch, getWaTemplates, getAllWaTemplates, createWaTemplate, updateWaTemplate, deleteWaTemplate, setWaTemplateActive, WA_TEMPLATE_ROLES, getSiteSettings, updateSiteSettings, getSiteAudit } from '../services/api';
 import { useNotifications } from '../context/NotificationContext';
 import BranchLocationPicker from '../components/common/BranchLocationPicker';
 import AnnouncementBanner from '../components/common/AnnouncementBanner';
@@ -339,27 +339,27 @@ function AuditLogsTab() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [actionFilter, setActionFilter] = useState('all');
+  const [moduleFilter, setModuleFilter] = useState('all');
 
   useEffect(() => {
-    getAuditTrail({}).then(({ data }) => {
+    getSystemAuditTrail({}).then(({ data }) => {
       setRows(data);
       setLoading(false);
     });
   }, []);
 
   const filtered = rows.filter((r) => {
-    if (actionFilter !== 'all' && r.action !== actionFilter) return false;
+    if (moduleFilter !== 'all' && r.module !== moduleFilter) return false;
     if (!search) return true;
     const term = search.toLowerCase();
     return (
-      r.ticket.toLowerCase().includes(term) ||
       r.user.toLowerCase().includes(term) ||
-      r.action.toLowerCase().includes(term)
+      r.action.toLowerCase().includes(term) ||
+      (r.details || '').toLowerCase().includes(term)
     );
   });
 
-  const ACTIONS = ['all', 'Created', 'Assigned', 'Updated', 'Escalated', 'Resolved', 'Closed'];
+  const MODULES = ['all', ...SYSTEM_AUDIT_MODULES];
 
   if (loading) return <LoadingSpinner />;
 
@@ -367,8 +367,8 @@ function AuditLogsTab() {
     <div className="bg-white dark:bg-ticano-dark-card rounded-2xl shadow p-6">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
-          <h3 className="font-bold text-ticano-charcoal dark:text-white text-lg">Complaint Audit Log</h3>
-          <p className="text-xs text-gray-500">Immutable record of every state change. {rows.length} entries.</p>
+          <h3 className="font-bold text-ticano-charcoal dark:text-white text-lg">System Audit Log</h3>
+          <p className="text-xs text-gray-500">What users are doing across the platform — logins, employee and branch changes, content updates, client portfolio activity, and complaint handling. {rows.length} entries.</p>
         </div>
         <ExportButton onExport={(fmt) => toast.success(`Exporting ${fmt.toUpperCase()}...`)} />
       </div>
@@ -377,15 +377,15 @@ function AuditLogsTab() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search ticket, user, action…"
+          placeholder="Search user, action, details…"
           className="flex-1 min-w-[200px] px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
         />
         <select
-          value={actionFilter}
-          onChange={(e) => setActionFilter(e.target.value)}
+          value={moduleFilter}
+          onChange={(e) => setModuleFilter(e.target.value)}
           className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
         >
-          {ACTIONS.map((a) => <option key={a} value={a}>{a === 'all' ? 'All actions' : a}</option>)}
+          {MODULES.map((m) => <option key={m} value={m}>{m === 'all' ? 'All modules' : m}</option>)}
         </select>
       </div>
 
@@ -393,22 +393,21 @@ function AuditLogsTab() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 dark:border-gray-700">
-              {['Timestamp', 'Ticket', 'User', 'Action', 'Previous', 'New'].map((h) => (
+              {['Timestamp', 'Module', 'User', 'Action', 'Details'].map((h) => (
                 <th key={h} className="text-left py-3 px-2 text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wide">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="py-8 text-center text-gray-400">No entries match the current filters</td></tr>
+              <tr><td colSpan={5} className="py-8 text-center text-gray-400">No entries match the current filters</td></tr>
             ) : filtered.map((r) => (
               <tr key={r.id} className="border-b border-gray-100 dark:border-gray-800">
                 <td className="py-2 px-2 text-xs text-gray-500">{new Date(r.at).toLocaleString()}</td>
-                <td className="py-2 px-2 font-mono text-ticano-red font-semibold">{r.ticket}</td>
+                <td className="py-2 px-2"><span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">{r.module}</span></td>
                 <td className="py-2 px-2">{r.user}</td>
-                <td className="py-2 px-2"><span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">{r.action}</span></td>
-                <td className="py-2 px-2 text-xs text-gray-500 font-mono">{r.previousValue || '—'}</td>
-                <td className="py-2 px-2 text-xs font-mono">{r.newValue || '—'}</td>
+                <td className="py-2 px-2">{r.action}</td>
+                <td className="py-2 px-2 text-xs text-gray-500">{r.details || '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -546,6 +545,15 @@ function EditUserModal({ user, onClose, onSaved }) {
   );
 }
 
+// TikTok SVG icon (not in lucide-react) — mirrors the one shown on the public homepage.
+function TikTokIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V9a8.16 8.16 0 004.77 1.52V7.07a4.85 4.85 0 01-1-.38z"/>
+    </svg>
+  );
+}
+
 // ---------------------------------------------------------------------
 //  Website Content — admin-editable landing-page content
 //  (contact details, social links, mission/vision, legal documents)
@@ -590,6 +598,7 @@ function LandingPageManagementTab() {
     { key: 'twitter',   label: 'X (Twitter)', icon: Twitter },
     { key: 'whatsapp',  label: 'WhatsApp',    icon: MessageCircle },
     { key: 'youtube',   label: 'YouTube',     icon: Youtube },
+    { key: 'tiktok',    label: 'TikTok',      icon: TikTokIcon },
   ];
   const LEGAL_DEFS = [
     { key: 'privacy', label: 'Privacy Policy' },
@@ -654,7 +663,7 @@ function LandingPageManagementTab() {
                     className={`${inp} ${!valid ? 'border-red-400 focus:ring-red-400' : ''}`} />
                   {!valid && <p className="text-[11px] text-red-500 mt-0.5">Must start with http:// or https://</p>}
                 </div>
-                <button type="button" onClick={() => sm.url ? window.open(sm.url, '_blank', 'noopener') : toast('Add a URL first', { icon: 'ℹ️' })}
+                <button type="button" onClick={() => sm.url ? window.open(sm.url, '_blank', 'noopener') : toast('Add a URL first')}
                   className="p-2 text-gray-400 hover:text-ticano-red" title="Preview link"><Eye size={15} /></button>
                 <button type="button" onClick={() => setSocial(key, { enabled: !sm.enabled })}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 ${sm.enabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700'}`}>

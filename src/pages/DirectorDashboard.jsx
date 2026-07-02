@@ -13,6 +13,7 @@ import AdvancedCharts from '../components/common/AdvancedCharts';
 import EmailNotifications from '../components/common/EmailNotifications';
 import AnnouncementBanner from '../components/common/AnnouncementBanner';
 import EscalationDetailModal from '../components/common/EscalationDetailModal';
+import ClientPortfolio from '../components/common/ClientPortfolio';
 import { useAuth } from '../context/AuthContext';
 import {
   getBranchComparison, getReferralSources, getCsatTrend, getWordCloud,
@@ -28,7 +29,7 @@ import { JOURNEY_STAGE_LABEL, complaintStatusLabel, BRANCH_COORDS } from '../uti
 import { formatDateTime } from '../utils/format';
 import toast from 'react-hot-toast';
 
-const TABS = ['Action Centre', 'Analytics', 'Escalations', 'Announcements', 'Reports', 'Email Notifications', 'Bulk Message'];
+const TABS = ['Action Centre', 'Analytics', 'Escalations', 'Client Portfolio', 'Announcements', 'Reports', 'Email Notifications', 'Bulk Message'];
 // Analytics views consolidated under the single "Analytics" tab.
 const DIR_ANALYTICS_VIEWS = [
   { id: 'Executive Summary',   label: 'Executive Summary',   desc: 'Company CSAT and headline KPIs',          icon: TrendingUp,        accent: 'navy' },
@@ -416,6 +417,9 @@ export default function DirectorDashboard() {
         {activeTab === 'Announcements' && <AnnouncementsTab />}
 
         {/* ---------- REPORTS ---------- */}
+        {/* ---------- CLIENT PORTFOLIO (org-wide PM CRM oversight) ---------- */}
+        {activeTab === 'Client Portfolio' && <ClientPortfolio mode="orgwide" />}
+
         {activeTab === 'Reports' && (
           <div className="bg-white dark:bg-ticano-dark-card rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
             <h3 className="font-bold text-ticano-charcoal dark:text-white text-lg mb-1">PDF Report Generator</h3>

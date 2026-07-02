@@ -37,7 +37,7 @@ export default function TwoFactorAuth({ userEmail, userName, onVerified }) {
     setLoading(true);
     await new Promise(r => setTimeout(r, 600));
     if (entered === generatedCode) {
-      toast.success('Identity verified ✓');
+      toast.success('Identity verified');
       onVerified?.();
     } else {
       setAttempts(a => a + 1);

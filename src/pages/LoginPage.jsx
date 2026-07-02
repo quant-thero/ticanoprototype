@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   Eye, EyeOff, Lock, User, ArrowRight, ChevronRight, Mail, X, ShieldCheck,
-  Bell, BellRing, Check, UserPlus, LogIn, Cake, MapPin, Building2, CheckCircle2,
+  Bell, BellRing, Check, UserPlus, LogIn, Cake, MapPin, Building2, CheckCircle2, ArrowLeft,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -233,13 +233,16 @@ export default function LoginPage() {
         {/* ===== LEFT — Brand ===== */}
         <div className="flex flex-col lg:w-[48%] px-7 pt-8 pb-2 lg:px-16 lg:py-14">
           <div className={`transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'} motion-reduce:transition-none motion-reduce:translate-y-0`}>
+            <Link to="/" className="inline-flex items-center gap-1.5 text-white/50 hover:text-white text-xs font-medium mb-6 transition-colors">
+              <ArrowLeft size={13} /> Back to homepage
+            </Link>
             <div className="flex items-center gap-3 mb-10 lg:mb-14">
               <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-xl shadow-black/30 ring-1 ring-black/5">
                 <Logo size={26} />
               </div>
               <div>
                 <p className="text-white font-bold text-lg leading-tight">Ticano Group</p>
-                <p className="text-white/45 text-xs tracking-wide">Purchase Order Financing Specialists</p>
+                <p className="text-white/45 text-xs tracking-wide">{lpVal('brandSubtitle', 'Purchase Order Financing Specialists')}</p>
               </div>
             </div>
           </div>
@@ -256,8 +259,7 @@ export default function LoginPage() {
               </p>
 
               <p className="text-white/55 text-base leading-relaxed max-w-md mb-10">
-                Botswana&apos;s champion for Purchase Order Financing and Invoice Discounting —
-                helping SMEs access the capital they need to fulfil orders and grow with confidence.
+                {lpVal('heroSubtitle', "Botswana's champion for Purchase Order Financing and Invoice Discounting — helping SMEs access the capital they need to fulfil orders and grow with confidence.")}
               </p>
 
               {/* Trust markers (verifiable, not vanity metrics) */}

@@ -90,7 +90,7 @@ export default function MaintenancePanel() {
         </div>
         <div className="flex-1">
           <p className={`font-bold text-sm ${active ? 'text-red-700 dark:text-red-300' : 'text-green-700 dark:text-green-300'}`}>
-            {active ? '🔴 System is in MAINTENANCE MODE' : '🟢 System is ONLINE'}
+            {active ? 'System is in MAINTENANCE MODE' : 'System is ONLINE'}
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
             {active ? 'All non-admin users see the maintenance screen' : 'All users have full access to the platform'}
@@ -213,7 +213,7 @@ export default function MaintenancePanel() {
               ))}
             </div>
             <p className="text-xs text-red-500 mt-4 p-3 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800">
-              ⚠️ All non-admin users are currently seeing the maintenance screen. Click "Bring Back Online" above to restore access.
+              All non-admin users are currently seeing the maintenance screen. Click "Bring Back Online" above to restore access.
             </p>
           </div>
         ) : null;
