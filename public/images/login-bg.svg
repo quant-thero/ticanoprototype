@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a1b;stop-opacity:1" />
+      <stop offset="55%" style="stop-color:#373435;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1a1a1b;stop-opacity:1" />
+    </linearGradient>
+    <radialGradient id="redGlow" cx="80%" cy="20%" r="55%">
+      <stop offset="0%" style="stop-color:#CE313C;stop-opacity:0.25" />
+      <stop offset="60%" style="stop-color:#CE313C;stop-opacity:0.05" />
+      <stop offset="100%" style="stop-color:#CE313C;stop-opacity:0" />
+    </radialGradient>
+    <radialGradient id="grayGlow" cx="15%" cy="80%" r="50%">
+      <stop offset="0%" style="stop-color:#808686;stop-opacity:0.18" />
+      <stop offset="100%" style="stop-color:#808686;stop-opacity:0" />
+    </radialGradient>
+    <pattern id="grid" width="80" height="80" patternUnits="userSpaceOnUse">
+      <path d="M 80 0 L 0 0 0 80" fill="none" stroke="#ffffff" stroke-opacity="0.03" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <!-- Base gradient -->
+  <rect width="1600" height="1000" fill="url(#bgGradient)"/>
+  <!-- Subtle grid for financial / corporate feel -->
+  <rect width="1600" height="1000" fill="url(#grid)"/>
+  <!-- Color glows -->
+  <rect width="1600" height="1000" fill="url(#redGlow)"/>
+  <rect width="1600" height="1000" fill="url(#grayGlow)"/>
+
+  <!-- Abstract upward curves: representing growth / financing -->
+  <g opacity="0.08" stroke="#ffffff" stroke-width="1.5" fill="none">
+    <path d="M 0,900 Q 400,700 800,650 T 1600,400"/>
+    <path d="M 0,950 Q 400,800 800,750 T 1600,500"/>
+    <path d="M 0,850 Q 400,650 800,600 T 1600,350"/>
+  </g>
+
+  <!-- Big watermark Ticano mark in the corner -->
+  <g opacity="0.06" transform="translate(1150,520) scale(0.045)">
+    <path fill="#808686" d="M16173.28 6233.98c-2326.03,1966.51 -4249.68,1617.19 -5139.73,555.02 -890.05,-1062.19 247.82,-2575.55 1674.71,-977.87 1137.61,1273.77 2813.95,607.66 3465.02,422.85z"/>
+    <path fill="#CE313C" d="M14460.87 639.19c2777.83,1240.61 3307.26,3131.37 2746.38,4400.4 -560.89,1269.02 -2413.15,903.47 -1608.07,-1084.94 641.85,-1585.29 -687.96,-2808.17 -1138.31,-3315.46z"/>
+    <path fill="#808686" d="M10303.5 5161.71c-291.24,-3040.37 1086.76,-4433.51 2462.28,-4566.99 1375.52,-133.47 1969.79,1666.77 -149.21,1940.44 -1689.4,218.2 -2094.99,1983.05 -2313.07,2626.55z"/>
+  </g>
+
+  <!-- Soft floating circles -->
+  <circle cx="220" cy="180" r="3" fill="#CE313C" opacity="0.6"/>
+  <circle cx="1380" cy="780" r="2" fill="#808686" opacity="0.5"/>
+  <circle cx="850" cy="120" r="2" fill="#ffffff" opacity="0.3"/>
+  <circle cx="1450" cy="240" r="2" fill="#ffffff" opacity="0.25"/>
+  <circle cx="180" cy="640" r="2" fill="#ffffff" opacity="0.2"/>
+</svg>

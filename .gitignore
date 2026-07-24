@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.vite/
+
+# Environment files — keep real values out of the repo
+.env
+.env.local
+.env.*.local
+# ...but DO track the template:
+!.env.example
